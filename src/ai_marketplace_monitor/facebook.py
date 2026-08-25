@@ -61,6 +61,7 @@ class Category(Enum):
     PROPERTY_RENTALS = "propertyrentals"
     APPAREL = "apparel"
     ELECTRONICS = "electronics"
+    PHONES = "phones"
     ENTERTAINMENT = "entertainment"
     FAMILY = "family"
     FREE_STUFF = "freestuff"
