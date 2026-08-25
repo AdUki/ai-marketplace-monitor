@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from logging import Logger
 from typing import Any, Callable, Generator, Generic, List, Type, TypeVar
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from playwright.sync_api import Browser, ElementHandle, Locator, Page  # type: ignore
 
@@ -526,6 +527,13 @@ class Marketplace(Generic[TMarketplaceConfig, TItemConfig]):
     def goto_url(self: "Marketplace", url: str, attempt: int = 0) -> None:
         try:
             assert self.page is not None
+            # Force English so this tool's hardcoded English text/aria-label
+            # selectors keep working regardless of the account's Facebook
+            # display language (e.g. an account set to Slovak).
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query))
+            query["locale"] = "en_US"
+            url = urlunsplit(parts._replace(query=urlencode(query)))
             if self.logger:
                 self.logger.debug(f"{hilight('[Retrieve]', 'info')} Navigating to {url}")
             self.page.goto(url, timeout=0)
