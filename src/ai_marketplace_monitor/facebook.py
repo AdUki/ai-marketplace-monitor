@@ -513,9 +513,13 @@ class FacebookMarketplace(Marketplace):
                         + (f" with radius={radius}" if radius else " with default radius")
                     )
 
-                self.goto_url(
-                    marketplace_url + "&".join([f"query={quote(search_phrase)}", *options])
-                )
+                # An empty search_phrase means "browse the whole category with
+                # no keyword filter" (e.g. category='phones' scoping alone) —
+                # omit query= entirely rather than sending an empty value,
+                # since most listings won't literally contain a generic word
+                # like "phone" in their title/description.
+                query_parts = [f"query={quote(search_phrase)}"] if search_phrase else []
+                self.goto_url(marketplace_url + "&".join([*query_parts, *options]))
 
                 found_listings = FacebookSearchResultPage(
                     self.page, self.translator, self.logger
