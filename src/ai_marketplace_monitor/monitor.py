@@ -259,6 +259,21 @@ class MarketplaceMonitor:
             new_listings.append(listing)
             listing_ratings.append(res)
 
+            # Notify immediately per matching listing instead of waiting for
+            # the whole multi-search-phrase generator to finish. A single
+            # item can search several phrases (e.g. multiple brand names)
+            # back-to-back in one generator, and a broad phrase alone can
+            # yield dozens of listings each needing a page fetch + AI call --
+            # confirmed live this took 10+ minutes for a single phrase. A
+            # tool whose purpose is timely alerts should not sit on a
+            # confirmed match for that long just to batch it with later,
+            # unrelated results.
+            counter.increment(CounterItem.NEW_VALIDATED_LISTING, item_config.name)
+            for user in users_to_notify:
+                User(self.config.user[user], logger=self.logger).notify(
+                    [listing], [res], item_config
+                )
+
         p = inflect.engine()
         if self.logger:
             self.logger.info(
@@ -270,14 +285,6 @@ class MarketplaceMonitor:
                     new_count=len(new_listings),
                 ),
             )
-        if new_listings:
-            counter.increment(
-                CounterItem.NEW_VALIDATED_LISTING, item_config.name, len(new_listings)
-            )
-            for user in users_to_notify:
-                User(self.config.user[user], logger=self.logger).notify(
-                    new_listings, listing_ratings, item_config
-                )
         time.sleep(5)
 
     def _select_translator(
