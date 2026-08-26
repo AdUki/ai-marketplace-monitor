@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from logging import Logger
+from pathlib import Path
 from typing import Any, Callable, Generator, Generic, List, Type, TypeVar
 
 from playwright.sync_api import Browser, ElementHandle, Locator, Page  # type: ignore
@@ -13,6 +14,7 @@ from .utils import (
     KeyboardMonitor,
     MonitorConfig,
     Translator,
+    amm_home,
     convert_to_seconds,
     hilight,
 )
@@ -497,6 +499,29 @@ class Marketplace(Generic[TMarketplaceConfig, TItemConfig]):
             self.browser = None
             self.page = None
 
+    def session_state_file(self: "Marketplace") -> "Path":
+        return amm_home / f"{self.name}_session_state.json"
+
+    def save_session_state(self: "Marketplace") -> None:
+        """Persist cookies/localStorage so a completed login (incl. any 2FA
+        "remember this browser" trust) survives process restarts. Without
+        this, every single run starts a brand-new context with no session
+        history, so even a correct login can be forced back through 2FA
+        (or worse, silently degrade to Facebook's logged-out experience)
+        on every restart -- confirmed live this session.
+        """
+        if self.page is None:
+            return
+        try:
+            self.page.context.storage_state(path=str(self.session_state_file()))
+            if self.logger:
+                self.logger.debug(
+                    f"{hilight('[Session]', 'succ')} Saved browser session to {self.session_state_file()}."
+                )
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"{hilight('[Session]', 'fail')} Could not save session: {e}")
+
     def create_page(self: "Marketplace", swap_proxy: bool = False) -> Page:
         assert self.browser is not None
 
@@ -513,13 +538,19 @@ class Marketplace(Generic[TMarketplaceConfig, TItemConfig]):
             self.page = None
 
         if self.page is None:
+            state_file = self.session_state_file()
             context = self.browser.new_context(
+                storage_state=str(state_file) if state_file.exists() else None,
                 proxy=(
                     None
                     if self.config.monitor_config is None
                     else self.config.monitor_config.get_proxy_options()
-                )
+                ),
             )
+            if self.logger and state_file.exists():
+                self.logger.debug(
+                    f"{hilight('[Session]', 'succ')} Restored browser session from {state_file}."
+                )
             self.page = context.new_page()
         return self.page
 
