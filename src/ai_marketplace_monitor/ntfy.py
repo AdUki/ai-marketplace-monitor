@@ -19,6 +19,14 @@ class NtfyNotificationConfig(PushNotificationConfig):
 
     def handle_ntfy_server(self: "NtfyNotificationConfig") -> None:
         if self.ntfy_server is None:
+            # Documented default ("ntfy_server - Optional - default to
+            # https://ntfy.sh") was never actually applied here -- it was
+            # left as None forever, which then made required_fields treat
+            # it as permanently "missing" and silently drop every ntfy
+            # notification for anyone who (correctly, per the docs) omitted
+            # this field. Confirmed live: multiple 5-star matches never
+            # notified because of exactly this.
+            self.ntfy_server = "https://ntfy.sh"
             return
         if not isinstance(self.ntfy_server, str) or not self.ntfy_server:
             raise ValueError("An non-empty ntfy_server is needed.")
