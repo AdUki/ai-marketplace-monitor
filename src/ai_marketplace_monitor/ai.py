@@ -355,6 +355,12 @@ class OpenAIBackend(AIBackend):
             counter.increment(CounterItem.FAILED_AI_QUERY, item_config.name)
             raise ValueError(f"Empty or invalid response from {self.config.name}: {response}")
 
+        # Reasoning-capable models (e.g. qwen3.x) may wrap their chain of
+        # thought in <think>...</think>. That is internal scratch work, not a
+        # verdict, and must never reach the notification text.
+        answer = re.sub(r"<think>.*?</think>", " ", answer, flags=re.DOTALL | re.IGNORECASE)
+        answer = re.sub(r"<think>.*", " ", answer, flags=re.DOTALL | re.IGNORECASE)
+
         lines = answer.split("\n")
         # if any of the lines contains "Rating: ", extract the rating from it.
         score: int = 1
@@ -375,7 +381,17 @@ class OpenAIBackend(AIBackend):
             comment = lines[rating_line - 1]
 
         # remove multiple spaces, take first 30 words
-        comment = " ".join([x for x in comment.split() if x.strip()]).strip()
+        #
+        # NOTE: this comment claimed "take first 30 words" but no truncation
+        # was ever applied. Combined with the loop above -- which appends
+        # EVERY line that follows the "Rating N:" line into the comment --
+        # any model that keeps explaining after stating its rating (or that
+        # emits chain-of-thought) produced an unbounded comment. That comment
+        # is what goes into the push notification, so alerts arrived as walls
+        # of reasoning text instead of a one-line verdict. Now actually
+        # truncated, as originally intended.
+        words = [x for x in comment.split() if x.strip()]
+        comment = " ".join(words[:30]) + ("..." if len(words) > 30 else "")
         res = AIResponse(name=self.config.name, score=score, comment=comment)
         res.to_cache(listing, item_config, marketplace_config)
         counter.increment(CounterItem.NEW_AI_QUERY, item_config.name)
