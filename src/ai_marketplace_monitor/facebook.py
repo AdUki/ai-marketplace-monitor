@@ -12,6 +12,7 @@ from urllib.parse import quote
 import humanize
 from currency_converter import CurrencyConverter  # type: ignore
 from playwright.sync_api import Browser, ElementHandle, Page  # type: ignore
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # type: ignore
 from rich.pretty import pretty_repr
 
 from .listing import Listing
@@ -319,17 +320,37 @@ class FacebookMarketplace(Marketplace):
         try:
             allow_button_locator = self.page.get_by_role(
                 "button",
-                name=re.compile(r"Allow all cookies|Allow cookies|Accept All", re.IGNORECASE),
+                name=re.compile(
+                    # English + Slovak (this account's Facebook renders in
+                    # Slovak by default for a Slovak IP with no forced
+                    # locale). The original English-only regex silently
+                    # failed to find/dismiss this dialog, which then sat on
+                    # top of the login form and blocked every login attempt
+                    # -- confirmed via direct cookie/session check (no
+                    # c_user/xs cookie ever set) and a screenshot showing
+                    # the Slovak consent modal covering the login fields.
+                    r"Allow all cookies|Allow cookies|Accept All"
+                    r"|Povoliť všetky cookies|Povoliť všetky|Prijať všetky",
+                    re.IGNORECASE,
+                ),
             )
 
-            if allow_button_locator.is_visible():
-                allow_button_locator.click()
-                self.page.wait_for_timeout(2000)  # 2 seconds
-                if self.logger:
-                    self.logger.debug(
-                        f"""{hilight("[Login]", "succ")} Allow all cookies' button clicked."""
-                    )
-            elif self.logger:
+            # NOTE: the dialog is not present in the DOM immediately after
+            # navigation -- it renders a moment later. The previous code
+            # checked is_visible() synchronously with no wait, which raced
+            # the dialog's render and always concluded "not found", even
+            # when (confirmed live, screenshot + DOM dump) the dialog was
+            # genuinely there covering the login form moments later. Waiting
+            # here is what actually matters, not just the text pattern.
+            allow_button_locator.first.wait_for(state="visible", timeout=8000)
+            allow_button_locator.first.click()
+            self.page.wait_for_timeout(2000)  # 2 seconds
+            if self.logger:
+                self.logger.debug(
+                    f"""{hilight("[Login]", "succ")} Allow all cookies' button clicked."""
+                )
+        except PlaywrightTimeoutError:
+            if self.logger:
                 self.logger.debug(
                     f"{hilight('[Login]', 'succ')} Cookie consent pop-up not found or not visible within timeout."
                 )
@@ -355,6 +376,20 @@ class FacebookMarketplace(Marketplace):
                 time.sleep(2)
                 # Facebook removed the <button name="login"> — press Enter to submit the form
                 self.page.keyboard.press("Enter")
+                # NOTE: this wait is NOT the same thing as login_wait_time
+                # below (which exists for a human to solve a CAPTCHA, and
+                # can be legitimately set to 0 in headless/unattended runs).
+                # This one just gives Facebook's server time to process the
+                # login POST and redirect -- confirmed live via screenshot
+                # that with login_wait_time=0, the very next check ran while
+                # the submit button was still mid-spinner, correct
+                # credentials and all, and was wrongly read as a failure.
+                try:
+                    self.page.wait_for_url(
+                        lambda url: "login" not in url, timeout=15000
+                    )
+                except PlaywrightTimeoutError:
+                    pass
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -376,6 +411,30 @@ class FacebookMarketplace(Marketplace):
                     )
                 )
             doze(login_wait_time, keyboard_monitor=self.keyboard_monitor)
+
+        # The rest of this function previously had no way to detect a
+        # failed login -- it just typed credentials, pressed Enter, and
+        # optimistically moved on to searching regardless of outcome.
+        # Confirmed live: a blocked/failed login (e.g. a consent dialog
+        # covering the form) went completely undetected for an entire
+        # session, silently degrading to Facebook's logged-out behavior
+        # (which drops city scoping entirely) with zero error logged.
+        if self.config.username and self.config.password:
+            try:
+                cookie_names = {c["name"] for c in self.page.context.cookies()}
+            except Exception:
+                cookie_names = set()
+            if "c_user" not in cookie_names:
+                if self.logger:
+                    self.logger.error(
+                        f"""{hilight("[Login]", "fail")} Not logged in to Facebook (no session cookie after login attempt) -- current page: {self.page.url}. Search results will be Facebook's logged-out/default experience, NOT scoped to your account or its location. This usually means something (a dialog, checkpoint, or CAPTCHA) blocked the login form."""
+                    )
+            else:
+                self.save_session_state()
+                if self.logger:
+                    self.logger.debug(
+                        f"""{hilight("[Login]", "succ")} Logged in to Facebook."""
+                    )
 
     def search(
         self: "FacebookMarketplace", item_config: FacebookItemConfig
