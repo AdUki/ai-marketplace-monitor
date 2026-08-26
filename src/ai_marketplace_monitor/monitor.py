@@ -795,4 +795,12 @@ class MarketplaceMonitor:
                         f"""{hilight("[AI]", "fail")} Failed to get an answer from {agent.config.name}: {e}"""
                     )
                 continue
-        return AIResponse(5, AIResponse.NOT_EVALUATED)
+        # NOTE: score must default LOW, not high. This previously returned
+        # AIResponse(5, ...) -- 5 is the maximum/"Great deal" score, so any
+        # listing that failed evaluation (rate limit, API error, etc.) was
+        # treated as a perfect match and notified regardless of actual
+        # relevance. Confirmed live: a Gemini 429 rate-limit error produced
+        # an immediate "Great deal" notification for a completely
+        # unevaluated listing. An unevaluated listing should be excluded by
+        # default, not blindly surfaced as the best possible match.
+        return AIResponse(1, AIResponse.NOT_EVALUATED)
