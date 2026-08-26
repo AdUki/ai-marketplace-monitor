@@ -296,6 +296,8 @@ class OpenAIBackend(AIBackend):
 
         self.connect()
 
+        response = None
+        last_error: Exception | None = None
         retries = 0
         while retries < self.config.max_retries:
             self.connect()
@@ -320,10 +322,25 @@ class OpenAIBackend(AIBackend):
                     self.logger.error(
                         f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
                     )
+                last_error = e
                 retries += 1
                 # try to initiate a connection
                 self.client = None
-                time.sleep(5)
+                # Exponential backoff instead of a flat 5s. The dominant
+                # real-world failure here is HTTP 429 (quota/rate limit);
+                # retrying 10x at a fixed 5s hammers an already-throttled
+                # endpoint, burns ~50s per listing, and makes the limit
+                # worse rather than letting it recover.
+                time.sleep(min(5 * (2 ** (retries - 1)), 120))
+
+        if response is None:
+            # Previously this fell through with `response` unbound, raising
+            # UnboundLocalError on the next line instead of a meaningful
+            # error about the actual API failure.
+            counter.increment(CounterItem.FAILED_AI_QUERY, item_config.name)
+            raise RuntimeError(
+                f"{self.config.name} failed to evaluate {listing.title} after {retries} attempts: {last_error}"
+            )
 
         # check if the response is yes
         if self.logger:
@@ -429,6 +446,8 @@ class AnthropicBackend(AIBackend):
 
         self.connect()
 
+        response = None
+        last_error: Exception | None = None
         retries = 0
         while retries < self.config.max_retries:
             self.connect()
@@ -450,9 +469,18 @@ class AnthropicBackend(AIBackend):
                     self.logger.error(
                         f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
                     )
+                last_error = e
                 retries += 1
                 self.client = None
-                time.sleep(5)
+                # Exponential backoff -- see the matching comment in the
+                # OpenAI-compatible backend above.
+                time.sleep(min(5 * (2 ** (retries - 1)), 120))
+
+        if response is None:
+            counter.increment(CounterItem.FAILED_AI_QUERY, item_config.name)
+            raise RuntimeError(
+                f"{self.config.name} failed to evaluate {listing.title} after {retries} attempts: {last_error}"
+            )
 
         if self.logger:
             self.logger.debug(f"""{hilight("[AI-Response]", "info")} {pretty_repr(response)}""")
