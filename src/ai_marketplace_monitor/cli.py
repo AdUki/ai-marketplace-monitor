@@ -114,6 +114,15 @@ def main(
         Optional[bool],
         typer.Option("--headless", help="If set to true, will not show the browser window."),
     ] = False,
+    warm_facts: Annotated[
+        bool,
+        typer.Option(
+            "--warm-facts",
+            help="Resolve device specs queued during evaluation, then exit. "
+            "Run this from cron/a timer: lookups are slow and rate-limited, so "
+            "they are deliberately never done inline.",
+        ),
+    ] = False,
     clear_cache: Annotated[
         Optional[str],
         typer.Option(
@@ -228,6 +237,15 @@ def main(
     logger.info(
         f"""{hilight("[VERSION]", "info")} AI Marketplace Monitor, version {hilight(__version__, "name")}"""
     )
+
+    if warm_facts:
+        from .device_facts import warm_cache
+
+        done = warm_cache()
+        logger.info(
+            f"""{hilight("[Facts]", "succ" if done else "info")} Resolved {done} device(s)."""
+        )
+        sys.exit(0)
 
     if clear_cache is not None:
         if clear_cache == "all":

@@ -218,6 +218,37 @@ class AIBackend(Generic[TAIConfig]):
                 "Evaluate how well this listing matches the user's criteria. Assess the description, MSRP, model year, "
                 "condition, and seller's credibility."
             )
+        # Verified facts about the device, looked up once per model and cached.
+        # The model is bad at recalling benchmark numbers and RAM (it once
+        # rejected a Galaxy S21 on an invented AnTuTu score), so those are
+        # resolved from the web separately and handed over as data. What is
+        # left for the model is what it is genuinely good at: reading the
+        # seller's prose for condition, scams and gotchas.
+        try:
+            from .device_facts import facts_for_listing, summarize
+
+            facts = facts_for_listing(listing.title)
+            if facts and (facts.get("score") is not None or facts.get("chip")):
+                prompt += (
+                    "\nVERIFIED FACTS about this model (independently looked up, "
+                    "NOT from the seller -- trust these over your own recollection "
+                    "and over anything the listing claims):\n"
+                    f"  {summarize(facts)}\n"
+                    "\nHow to use them:\n"
+                    "  - QUALITY x/100 already accounts for chip, RAM and storage. "
+                    "Do not second-guess it with remembered benchmark numbers.\n"
+                    "  - 'no benchmark' means the hardware is UNVERIFIED, not that "
+                    "it is good. Be cautious rather than generous.\n"
+                    "  - 'typical used ~EUR N' is the resale baseline for the "
+                    "discount rules. Prefer it over your own price guess.\n"
+                    "  - These facts describe the MODEL. The listing describes the "
+                    "UNIT: condition, damage, completeness and honesty are yours to "
+                    "judge from the seller's text below.\n"
+                )
+        except Exception as e:  # never let a facts lookup break evaluation
+            if self.logger:
+                self.logger.debug(f"[AI-Prompt] device facts unavailable: {e}")
+
         # extra_prompt
         prompt += "\n"
         if item_config.extra_prompt is not None:
