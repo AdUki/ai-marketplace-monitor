@@ -66,6 +66,11 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # (HTTP 413) whenever the per-minute token budget is partly used, which on a
 # free tier is most of the time.
 GROQ_SEARCH_MODELS = ("groq/compound-mini", "groq/compound")
+# Plain (non-agentic) models, tried only after the searching ones are busy.
+# They answer from training data instead of the live web, so the result is
+# marked unverified -- but a known RAM figure and a roughly right benchmark
+# beat no spec line at all, and these have their own separate rate limits.
+GROQ_FALLBACK_MODELS = ("openai/gpt-oss-120b", "qwen/qwen3.6-27b")
 UA = "ai-marketplace-monitor device-facts"
 
 
@@ -323,7 +328,7 @@ def fetch_specs(model: str, api_key: str, kind: str = "auto", timeout: int = 45)
     """
     last_err: Optional[Exception] = None
 
-    for model_name in GROQ_SEARCH_MODELS:
+    for model_name in GROQ_SEARCH_MODELS + GROQ_FALLBACK_MODELS:
         for attempt in range(2):
             payload = {
                 "model": model_name,
@@ -360,6 +365,10 @@ def fetch_specs(model: str, api_key: str, kind: str = "auto", timeout: int = 45)
                 raise ValueError(f"no JSON in response from {model_name}: {content[:150]}")
             facts = json.loads(m.group(0))
             facts["looked_up_by"] = model_name
+            if model_name in GROQ_FALLBACK_MODELS:
+                # No web access: recalled, not verified. Recorded so the
+                # figures can be told apart from searched ones later.
+                facts["unverified"] = True
             return facts
 
     raise last_err or RuntimeError("spec lookup failed")
@@ -591,6 +600,17 @@ def warm_cache(limit: int = 5, verbose: bool = True) -> int:
             time.sleep(25)
         try:
             facts = device_facts(title, refresh=True, kind=info.get("kind", "auto"))
+            if not has_real_facts(facts):
+                # device_facts swallows lookup errors into specs_error, so a
+                # rate-limited attempt returns "successfully" with nothing in
+                # it. Popping that would silently retire the model from the
+                # queue forever -- which is why the queue drained while no
+                # benchmark was ever cached. Leave it queued and stop: the
+                # limit is per-minute and shared, so the rest of the batch
+                # would fail the same way.
+                if verbose:
+                    print(f"  {title}: no data ({facts.get('specs_error', '?')}), left queued")
+                break
             if verbose:
                 print(f"  {title}: {summarize(facts)}")
             pending.pop(key, None)

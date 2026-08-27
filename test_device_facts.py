@@ -292,8 +292,10 @@ class TestFetchFailures(unittest.TestCase):
                                   side_effect=self._http_error(429)) as uo:
             with self.assertRaises(df.RateLimited):
                 df.fetch_specs("X", "key", timeout=1)
-            # 2 attempts x each configured search model
-            self.assertEqual(uo.call_count, 2 * len(df.GROQ_SEARCH_MODELS))
+            # 2 attempts x every model in the chain: the searching ones
+            # first, then the plain fallbacks.
+            expected = 2 * len(df.GROQ_SEARCH_MODELS + df.GROQ_FALLBACK_MODELS)
+            self.assertEqual(uo.call_count, expected)
 
     def test_413_treated_as_busy_not_fatal(self):
         """Groq answers 413, not 429, when a request exceeds the token budget."""
@@ -464,3 +466,56 @@ def _json_or_empty(path):
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
+
+
+class TestWarmCacheQueueing(unittest.TestCase):
+    """A failed lookup must never retire a model from the queue."""
+
+    def test_unresolved_stays_queued(self):
+        with TempCache():
+            df._save(df.PENDING, {"samsung galaxy s21": {"title": "Samsung Galaxy S21"}})
+            with mock.patch.object(df, "device_facts",
+                                   return_value={"specs_error": "busy"}):
+                done = df.warm_cache(limit=1, verbose=False)
+            self.assertEqual(done, 0)
+            self.assertIn("samsung galaxy s21", _json_or_empty(df.PENDING))
+
+    def test_resolved_is_removed(self):
+        with TempCache():
+            df._save(df.PENDING, {"samsung galaxy s21": {"title": "Samsung Galaxy S21"}})
+            with mock.patch.object(df, "device_facts",
+                                   return_value={"chip": "Exynos 2100", "ram_gb": [8]}):
+                done = df.warm_cache(limit=1, verbose=False)
+            self.assertEqual(done, 1)
+            self.assertEqual(_json_or_empty(df.PENDING), {})
+
+    def test_batch_stops_when_provider_is_busy(self):
+        """No point burning the rest of a batch on a shared per-minute limit."""
+        with TempCache():
+            df._save(df.PENDING, {f"phone {i}": {"title": f"Samsung Galaxy S{i}"}
+                                  for i in range(5)})
+            with mock.patch.object(df, "device_facts",
+                                   return_value={"specs_error": "429"}) as dfn:
+                df.warm_cache(limit=5, verbose=False)
+            self.assertEqual(dfn.call_count, 1, "should stop after the first failure")
+
+
+class TestFallbackModels(unittest.TestCase):
+    def test_fallback_result_is_marked_unverified(self):
+        body = json.dumps({"choices": [{"message": {"content": '{"ram_gb": [8]}'}}]}).encode()
+        cm = mock.MagicMock()
+        cm.read.return_value = body
+        cm.__enter__.return_value = cm
+        calls = {"n": 0}
+
+        def side_effect(*a, **k):
+            calls["n"] += 1
+            if calls["n"] <= 2 * len(df.GROQ_SEARCH_MODELS):
+                raise urllib.error.HTTPError("u", 429, "busy", {}, None)
+            return cm
+
+        with mock.patch.object(df.time, "sleep"), \
+                mock.patch.object(df.urllib.request, "urlopen", side_effect=side_effect):
+            got = df.fetch_specs("Samsung Galaxy S21", "key", timeout=1)
+        self.assertTrue(got.get("unverified"))
+        self.assertIn(got["looked_up_by"], df.GROQ_FALLBACK_MODELS)
