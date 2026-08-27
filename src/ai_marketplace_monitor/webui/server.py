@@ -557,6 +557,16 @@ def create_app(
         """
         rows = build_found_rows(cache)
         dismissed = _load_dismissed()
+        # A rating is only meaningful under the rules that produced it. When
+        # the config changes -- thresholds, the discount curve, scam rules --
+        # every earlier verdict was reached under different instructions, so
+        # anything rated before the config was last edited is marked stale
+        # rather than presented as a current judgement.
+        try:
+            cutoff = max(f.stat().st_mtime for f in config.config_files if f.exists())
+            cutoff_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cutoff))
+        except (OSError, ValueError):
+            cutoff_str = ""
         try:
             from ..device_facts import facts_for_listing
         except Exception:  # noqa: BLE001
@@ -566,6 +576,12 @@ def create_app(
         for r in rows:
             item = dict(r)
             item["dismissed"] = (r.get("url", "").split("?")[0]) in dismissed
+            # No rating means the AI never actually evaluated it (an API
+            # failure at the time), so there is no verdict to show.
+            item["unrated"] = not str(r.get("rating") or "").strip()
+            item["stale"] = bool(
+                cutoff_str and str(r.get("found_at") or "") < cutoff_str
+            )
             if facts_for_listing is not None:
                 try:
                     f = facts_for_listing(r.get("title", "")) or {}
@@ -593,6 +609,9 @@ def create_app(
                 "items": out,
                 "count": len(out),
                 "dismissed_count": sum(1 for i in out if i.get("dismissed")),
+                "stale_count": sum(1 for i in out if i.get("stale")),
+                "unrated_count": sum(1 for i in out if i.get("unrated")),
+                "criteria_changed_at": cutoff_str,
             }
         )
 
@@ -671,6 +690,10 @@ a.go{display:inline-block;background:var(--link);color:#08101c;
           border-radius:9px;padding:11px 14px;font-size:14px;min-height:44px;cursor:pointer}
 .hide-btn:hover{color:var(--fg);border-color:var(--bad)}
 .card.gone{opacity:.45}
+.card.stale{border-style:dashed;opacity:.8}
+.flag{display:inline-block;background:#3a2f12;color:#f0b429;border:1px solid #5c4a1a;
+      border-radius:6px;padding:2px 7px;font-size:11px;margin-top:8px}
+.note{color:var(--dim);font-size:12px;padding:0 12px 8px;max-width:900px;margin:0 auto}
 .undo{background:none;border:0;color:var(--link);font-size:13px;cursor:pointer;padding:11px 0}
 .more{margin-top:6px;color:var(--link);font-size:12px;cursor:pointer;
       background:none;border:0;padding:0}
@@ -689,6 +712,8 @@ a.go{display:inline-block;background:var(--link);color:#08101c;
       <option value="quality">quality</option><option value="cheap">cheapest</option></select>
     <label class="meta" style="display:flex;align-items:center;gap:6px;flex:0 0 auto">
       <input type="checkbox" id="showhidden" style="flex:none"> show hidden</label>
+    <label class="meta" style="display:flex;align-items:center;gap:6px;flex:0 0 auto">
+      <input type="checkbox" id="showold" style="flex:none"> show old ratings</label>
   </div>
 </header>
 <form id="login" autocomplete="on">
@@ -699,6 +724,7 @@ a.go{display:inline-block;background:var(--link);color:#08101c;
   <button type="submit">Sign in</button>
   <p class="err" id="err"></p>
 </form>
+<p class="note" id="note"></p>
 <main id="list"><div class="empty">Loading...</div></main>
 <script>
 const E=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -723,13 +749,15 @@ function specChips(s){
 }
 function card(it,i){
   const r=parseInt(it.rating)||0, s=it.specs||{};
-  return `<div class="card">
+  return `<div class="card${it.stale?" stale":""}">
     <div class="top"><p class="title">${E(it.title)}</p>
       ${r?`<span class="badge r${r}">${r}</span>`:""}</div>
     <div class="price">${E(it.price||"?")}</div>
     <div class="meta">${E(it.location||"")}${it.seller?" &middot; "+E(it.seller):""}${it.condition?" &middot; "+E(it.condition):""}</div>
     <div class="meta">${E(it.item||"")}${it.found_at?" &middot; "+E(it.found_at):""}</div>
     ${specChips(s)}
+    ${it.unrated?`<div class="flag">never rated - the AI call failed at the time</div>`:""}
+    ${it.stale&&!it.unrated?`<div class="flag">rated under earlier criteria</div>`:""}
     ${it.ai_comment?`<div class="ai">${E(it.ai_comment)}</div>`:""}
     ${it.description?`<div class="desc" id="d${i}">${E(it.description)}</div>
       <button class="more" onclick="document.getElementById('d${i}').classList.toggle('open')">show more / less</button>`:""}
@@ -772,7 +800,9 @@ function render(){
   const min=parseInt(document.getElementById("min").value)||0;
   const sort=document.getElementById("sort").value;
   const showHidden=document.getElementById("showhidden").checked;
+  const showOld=document.getElementById("showold").checked;
   let v=ITEMS.filter(it=>showHidden?true:!it.dismissed)
+    .filter(it=>showOld?true:(!it.stale&&!it.unrated))
     .filter(it=>(parseInt(it.rating)||0)>=min).filter(it=>!q||
     [it.title,it.seller,it.ai_comment,it.item,it.description].join(" ").toLowerCase().includes(q));
   if(sort==="new") v.sort((a,b)=>String(b.found_at||"").localeCompare(String(a.found_at||"")));
@@ -793,7 +823,14 @@ function load(){
     if(r.status===401){showLogin();return null} return r.json()})
    .then(d=>{if(!d)return;
      document.getElementById("login").classList.remove("show");
-     ITEMS=d.items||[];render()})
+     ITEMS=d.items||[];
+     const old=(d.stale_count||0)+(d.unrated_count||0);
+     document.getElementById("note").textContent = old
+       ? `${old} older listing(s) hidden: they were rated before the criteria last `
+         + `changed (${d.criteria_changed_at||"?"}), so those verdicts no longer `
+         + `reflect the current rules. Tick "show old ratings" to see them.`
+       : "";
+     render()})
    .catch(e=>{document.getElementById("list").innerHTML=
      '<div class="empty">Could not load items: '+E(e.message)+'</div>'});
 }
@@ -812,7 +849,7 @@ document.getElementById("login").addEventListener("submit",ev=>{
    .catch(e=>{document.getElementById("err").textContent=e.message});
 });
 load();
-["q","min","sort","showhidden"].forEach(id=>document.getElementById(id)
+["q","min","sort","showhidden","showold"].forEach(id=>document.getElementById(id)
   .addEventListener("input",render));
 </script></body></html>"""
 
