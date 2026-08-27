@@ -829,9 +829,16 @@ class MarketplaceMonitor:
                 raise
             except Exception as e:
                 if self.logger:
-                    self.logger.error(
-                        f"""{hilight("[AI]", "fail")} Failed to get an answer from {agent.config.name}: {e}"""
-                    )
+                    from .ai import is_quota_error
+
+                    if is_quota_error(e):
+                        self.logger.info(
+                            f"""{hilight("[AI]", "info")} {agent.config.name} unavailable (rate limit/quota); trying the next service."""
+                        )
+                    else:
+                        self.logger.error(
+                            f"""{hilight("[AI]", "fail")} Failed to get an answer from {agent.config.name}: {e}"""
+                        )
                 continue
         # NOTE: score must default LOW, not high. This previously returned
         # AIResponse(5, ...) -- 5 is the maximum/"Great deal" score, so any
@@ -841,4 +848,9 @@ class MarketplaceMonitor:
         # an immediate "Great deal" notification for a completely
         # unevaluated listing. An unevaluated listing should be excluded by
         # default, not blindly surfaced as the best possible match.
+        if self.logger and self.ai_agents:
+            self.logger.error(
+                f"""{hilight("[AI]", "fail")} No AI service could evaluate {hilight(item.title)} """
+                f"""({len(self.ai_agents)} tried). Rating it 1 so it is not surfaced as a deal."""
+            )
         return AIResponse(1, AIResponse.NOT_EVALUATED)

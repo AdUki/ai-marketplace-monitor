@@ -14,6 +14,25 @@ from .marketplace import TItemConfig, TMarketplaceConfig
 from .utils import BaseConfig, CacheType, CounterItem, cache, counter, hilight
 
 
+def is_quota_error(exc: BaseException) -> bool:
+    """True when a provider is refusing because of rate/quota, not a fault.
+
+    Free tiers run out daily, and the AI chain exists precisely so that the
+    next service takes over. Logging that at ERROR trains the reader to
+    ignore genuine failures, so it is reported as INFO with the fallback
+    named instead. Groq answers 413 for a request over the remaining
+    per-minute token budget, so that counts too.
+    """
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "rate_limit", "rate limit", "quota", "429", "413",
+            "too many requests", "resource_exhausted", "payload too large",
+        )
+    )
+
+
 class AIServiceProvider(Enum):
     OPENAI = "OpenAI"
     DEEPSEEK = "DeepSeek"
@@ -350,9 +369,14 @@ class OpenAIBackend(AIBackend):
                 raise
             except Exception as e:
                 if self.logger:
-                    self.logger.error(
-                        f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
-                    )
+                    if is_quota_error(e):
+                        self.logger.info(
+                            f"""{hilight("[AI]", "info")} {self.config.name} is rate-limited or out of quota; falling back to the next AI service."""
+                        )
+                    else:
+                        self.logger.error(
+                            f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
+                        )
                 last_error = e
                 retries += 1
                 # try to initiate a connection
@@ -513,9 +537,14 @@ class AnthropicBackend(AIBackend):
                 raise
             except Exception as e:
                 if self.logger:
-                    self.logger.error(
-                        f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
-                    )
+                    if is_quota_error(e):
+                        self.logger.info(
+                            f"""{hilight("[AI]", "info")} {self.config.name} is rate-limited or out of quota; falling back to the next AI service."""
+                        )
+                    else:
+                        self.logger.error(
+                            f"""{hilight("[AI-Error]", "fail")} {self.config.name} failed to evaluate {hilight(listing.title)}: {e}"""
+                        )
                 last_error = e
                 retries += 1
                 self.client = None
