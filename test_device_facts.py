@@ -163,7 +163,8 @@ class TestKindDetection(unittest.TestCase):
 
 class TestNormalisation(unittest.TestCase):
     def test_diacritics_and_punctuation(self):
-        self.assertEqual(df._norm("Predám  Galaxy-S21, 5G!"), "pred m galaxy s21 5g")
+        """Accents fold to their base letter rather than splitting the word."""
+        self.assertEqual(df._norm("Predám  Galaxy-S21, 5G!"), "predam galaxy s21 5g")
 
     def test_empty(self):
         self.assertEqual(df._norm(""), "")
@@ -385,3 +386,29 @@ class TestLive(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestModelKey(unittest.TestCase):
+    """One device must yield one cache key, however the seller wrote the ad."""
+
+    def test_listing_variants_collapse(self):
+        keys = {df.model_key(t) for t in (
+            "Predám Samsung Galaxy S21 5G 128GB, super stav",
+            "Samsung Galaxy S21 5G",
+            "SAMSUNG GALAXY S21 5g cierny 256GB zaruka",
+        )}
+        self.assertEqual(len(keys), 1, keys)
+
+    def test_accents_folded_not_split(self):
+        self.assertNotIn("pred m", df.model_key("Predám iPhone 11"))
+        self.assertEqual(df.model_key("Predám iPhone 11"), "iphone 11")
+
+    def test_distinct_models_stay_distinct(self):
+        self.assertNotEqual(df.model_key("Samsung Galaxy S21"),
+                            df.model_key("Samsung Galaxy S22"))
+
+    def test_capacity_tokens_dropped(self):
+        self.assertEqual(df.model_key("iPhone 11 64GB"), df.model_key("iPhone 11 256GB"))
+
+    def test_never_returns_empty(self):
+        self.assertTrue(df.model_key("predam novy telefon"))

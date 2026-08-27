@@ -39,6 +39,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -131,8 +132,56 @@ def lineage_devices(refresh: bool = False) -> List[Dict[str, str]]:
     return cached.get("devices", [])
 
 
+# Words that appear in listing titles but say nothing about which model it is.
+# Without stripping these, "Predam Samsung Galaxy S21 5G 128GB" and "Samsung
+# Galaxy S21" become two different cache keys for one device -- which meant a
+# web lookup per LISTING instead of per MODEL, exhausting the daily request
+# quota. Slovak/Czech included, since that is what the listings are written in.
+_NOISE = {
+    "predam", "predám", "predaj", "novy", "nový", "nova", "nová", "nove", "nové",
+    "uplne", "úplne", "super", "stav", "zanovny", "zánovný", "top", "lacno",
+    "ako", "novy!", "cierny", "čierny", "biely", "modry", "modrý", "zeleny",
+    "cierna", "biela", "sivy", "sivá", "zlty", "zlatý", "gold", "black", "white",
+    "blue", "green", "grey", "gray", "silver", "red", "pink", "purple",
+    "dual", "sim", "dualsim", "esim", "nabijacka", "zaruka", "záruka",
+    "faktura", "faktúra", "used", "new", "mint", "like", "condition",
+    "phone", "telefon", "telefón", "mobil", "smartfon", "smartfón", "handy",
+    "laptop", "notebook", "pc", "eur", "e", "s", "v", "so", "za",
+}
+# Capacity/spec tokens: variant detail, not model identity.
+_SPEC_RE = re.compile(r"^\d+(gb|tb|mb|mah|hz|ram|w)$|^\d+/\d+$|^\d+gb\d+gb$")
+
+
+def model_key(text: str) -> str:
+    """Reduce a listing title to a stable per-model cache key.
+
+    "Predám Samsung Galaxy S21 5G 128GB, super stav" -> "samsung galaxy s21 5g"
+
+    Keeps brand and model tokens, drops sales patter, colours, capacities and
+    condition words. Imperfect by nature -- sellers write whatever they like --
+    but it collapses the many ways one device is advertised into a single
+    lookup, which is the whole point of the cache.
+    """
+    tokens = []
+    for tok in _norm(text).split():
+        if tok in _NOISE or _SPEC_RE.match(tok):
+            continue
+        tokens.append(tok)
+        if len(tokens) >= 5:  # brand + model is short; the rest is description
+            break
+    return " ".join(tokens) or _norm(text)
+
+
 def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+    """Lowercase, strip accents, collapse to alphanumerics.
+
+    Accents are folded rather than dropped: naively removing non-ASCII turned
+    "Predám" into "pred m" (two meaningless tokens) instead of "predam", so
+    the Slovak sales words never matched the noise list.
+    """
+    folded = unicodedata.normalize("NFKD", s.lower())
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", folded).strip()
 
 
 def lineage_supported(model: str) -> Optional[Dict[str, str]]:
@@ -336,7 +385,7 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     Use that on any hot path; warm the cache separately.
     """
     cache = _load(FACTS_CACHE)
-    key = _norm(model)
+    key = model_key(model)
     if not refresh and key in cache:
         return cache[key]
 
@@ -359,7 +408,12 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
 
     # Manual overrides win over everything above.
     for ov_key, ov in _load(OVERRIDES).items():
-        if ov_key and ov_key in key:
+        # Normalize the override key too, so an entry written naturally
+        # ("iPhone 11 phone") still matches a key that has had filler words
+        # stripped. Match either direction: an override may be broader
+        # ("galaxy s21") or narrower than the key derived from the title.
+        ov_norm = model_key(ov_key)
+        if ov_norm and (ov_norm in key or key in ov_norm):
             facts.update(ov)
             facts["overridden"] = True
 
@@ -379,9 +433,13 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     returns whatever is locally knowable (LineageOS support, overrides).
     """
     cache = _load(FACTS_CACHE)
-    key = _norm(title)
+    key = model_key(title)
+    if key in cache:
+        return cache[key]
+    # Fall back to a containment match, so a longer cached key still serves a
+    # shorter title (and vice versa) rather than triggering a fresh lookup.
     for cached_key, facts in cache.items():
-        if cached_key and cached_key in key:
+        if cached_key and (cached_key in key or key in cached_key):
             return facts
     try:
         pending = _load(PENDING)
