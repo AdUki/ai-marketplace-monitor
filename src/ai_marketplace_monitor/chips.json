@@ -1,0 +1,950 @@
+{
+ "note": "Approximate reference values (+-10%); magnitude and ordering are what the score uses.",
+ "soc_antutu_v10": {
+  "snapdragon 8 elite": 3000000,
+  "snapdragon 8 gen 3": 2100000,
+  "snapdragon 8 gen 2": 1600000,
+  "snapdragon 8 gen 1": 1050000,
+  "snapdragon 888": 800000,
+  "snapdragon 865": 650000,
+  "snapdragon 855": 500000,
+  "snapdragon 845": 400000,
+  "snapdragon 835": 300000,
+  "snapdragon 8s gen 3": 1450000,
+  "snapdragon 7 gen 3": 800000,
+  "snapdragon 7 gen 1": 600000,
+  "snapdragon 782g": 560000,
+  "snapdragon 778g": 550000,
+  "snapdragon 780g": 540000,
+  "snapdragon 750g": 400000,
+  "snapdragon 732g": 350000,
+  "snapdragon 730g": 330000,
+  "snapdragon 720g": 330000,
+  "snapdragon 695": 400000,
+  "snapdragon 685": 300000,
+  "snapdragon 680": 280000,
+  "snapdragon 678": 290000,
+  "snapdragon 665": 230000,
+  "snapdragon 662": 230000,
+  "snapdragon 660": 220000,
+  "snapdragon 6 gen 1": 560000,
+  "snapdragon 480": 350000,
+  "snapdragon 460": 180000,
+  "snapdragon 439": 120000,
+  "dimensity 9300": 2200000,
+  "dimensity 9200": 1500000,
+  "dimensity 9000": 1000000,
+  "dimensity 8300": 1450000,
+  "dimensity 8200": 900000,
+  "dimensity 8100": 800000,
+  "dimensity 8020": 600000,
+  "dimensity 7300": 700000,
+  "dimensity 7200": 700000,
+  "dimensity 7050": 600000,
+  "dimensity 7025": 450000,
+  "dimensity 6300": 420000,
+  "dimensity 6100": 400000,
+  "dimensity 1080": 500000,
+  "dimensity 920": 520000,
+  "dimensity 900": 480000,
+  "dimensity 810": 390000,
+  "dimensity 700": 380000,
+  "helio g99": 400000,
+  "helio g96": 350000,
+  "helio g88": 250000,
+  "helio g85": 250000,
+  "helio g80": 230000,
+  "helio p35": 120000,
+  "helio p22": 100000,
+  "exynos 2400": 1650000,
+  "exynos 2200": 950000,
+  "exynos 2100": 800000,
+  "exynos 990": 650000,
+  "exynos 9820": 480000,
+  "exynos 9611": 250000,
+  "exynos 1580": 750000,
+  "exynos 1480": 700000,
+  "exynos 1380": 600000,
+  "exynos 1330": 400000,
+  "exynos 1280": 400000,
+  "exynos 850": 180000,
+  "a18 pro": 2100000,
+  "a18": 1800000,
+  "a17 pro": 1600000,
+  "a16 bionic": 1400000,
+  "a15 bionic": 1200000,
+  "a14 bionic": 800000,
+  "a13 bionic": 650000,
+  "a12 bionic": 500000,
+  "a11 bionic": 380000,
+  "tensor g4": 1100000,
+  "tensor g3": 1000000,
+  "tensor g2": 850000,
+  "tensor": 800000,
+  "kirin 9000s": 800000,
+  "kirin 990": 600000,
+  "kirin 980": 450000,
+  "kirin 710": 180000,
+  "unisoc t616": 250000,
+  "unisoc t606": 230000
+ },
+ "cpu_passmark": {
+  "apple m4 pro": 40000,
+  "apple m4": 25000,
+  "apple m3 pro": 30000,
+  "apple m3": 22000,
+  "apple m2 pro": 27000,
+  "apple m2": 16000,
+  "apple m1 pro": 22000,
+  "apple m1 max": 24000,
+  "apple m1": 15000,
+  "core ultra 9 185h": 32000,
+  "core ultra 7 155h": 28000,
+  "core ultra 5 125h": 24000,
+  "i9-13900h": 30000,
+  "i7-13700h": 28000,
+  "i5-13500h": 24000,
+  "i5-13450hx": 25000,
+  "i7-12700h": 26000,
+  "i5-12500h": 21000,
+  "i7-1260p": 18000,
+  "i5-1240p": 16000,
+  "i7-1195g7": 10500,
+  "i7-1165g7": 10000,
+  "i5-1135g7": 9500,
+  "i5-1145g7": 10000,
+  "i7-1065g7": 8500,
+  "i5-1035g1": 7500,
+  "i7-10750h": 12500,
+  "i5-10300h": 9500,
+  "i5-10210u": 6500,
+  "i7-9750h": 11500,
+  "i7-8750h": 10000,
+  "i7-8650u": 6000,
+  "i5-8350u": 5900,
+  "i5-8250u": 5800,
+  "i7-7700hq": 8000,
+  "i5-7300u": 4500,
+  "i5-6300u": 3800,
+  "i7-6700hq": 7000,
+  "i5-6200u": 3600,
+  "ryzen 9 7940hs": 30000,
+  "ryzen 7 7840hs": 28000,
+  "ryzen 7 7735hs": 24000,
+  "ryzen 7 5800h": 21000,
+  "ryzen 5 5600h": 18000,
+  "ryzen 5 5500u": 13000,
+  "ryzen 7 4800h": 18500,
+  "ryzen 5 4500u": 11000,
+  "ryzen 5 3500u": 7500,
+  "celeron n4020": 1300,
+  "pentium n5030": 2600,
+  "celeron n4500": 1900
+ },
+ "models": {
+  "samsung galaxy s25 ultra": {
+   "chip": "snapdragon 8 elite",
+   "ram_gb": [
+    12
+   ],
+   "release_year": 2025
+  },
+  "samsung galaxy s25": {
+   "chip": "snapdragon 8 elite",
+   "ram_gb": [
+    12
+   ],
+   "release_year": 2025
+  },
+  "samsung galaxy s24 ultra": {
+   "chip": "snapdragon 8 gen 3",
+   "ram_gb": [
+    12
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy s24": {
+   "chip": "exynos 2400",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy s23 ultra": {
+   "chip": "snapdragon 8 gen 2",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2023
+  },
+  "samsung galaxy s23": {
+   "chip": "snapdragon 8 gen 2",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2023
+  },
+  "samsung galaxy s22 ultra": {
+   "chip": "snapdragon 8 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2022
+  },
+  "samsung galaxy s22": {
+   "chip": "exynos 2200",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2022
+  },
+  "samsung galaxy s21 ultra": {
+   "chip": "exynos 2100",
+   "ram_gb": [
+    12,
+    16
+   ],
+   "release_year": 2021
+  },
+  "samsung galaxy s21": {
+   "chip": "exynos 2100",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2021
+  },
+  "samsung galaxy s21 fe": {
+   "chip": "exynos 2100",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2022
+  },
+  "samsung galaxy s20": {
+   "chip": "exynos 990",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2020
+  },
+  "samsung galaxy s20 fe": {
+   "chip": "exynos 990",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2020
+  },
+  "samsung galaxy s10": {
+   "chip": "exynos 9820",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2019
+  },
+  "samsung galaxy a56": {
+   "chip": "exynos 1580",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2025
+  },
+  "samsung galaxy a55": {
+   "chip": "exynos 1480",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy a54": {
+   "chip": "exynos 1380",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "samsung galaxy a53": {
+   "chip": "exynos 1280",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2022
+  },
+  "samsung galaxy a52": {
+   "chip": "snapdragon 720g",
+   "ram_gb": [
+    4,
+    6,
+    8
+   ],
+   "release_year": 2021
+  },
+  "samsung galaxy a35": {
+   "chip": "exynos 1380",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy a34": {
+   "chip": "dimensity 1080",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "samsung galaxy a33": {
+   "chip": "exynos 1280",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2022
+  },
+  "samsung galaxy a26": {
+   "chip": "exynos 1380",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2025
+  },
+  "samsung galaxy a17": {
+   "chip": "exynos 1330",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2025
+  },
+  "samsung galaxy a16": {
+   "chip": "exynos 1330",
+   "ram_gb": [
+    4,
+    6,
+    8
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy a15": {
+   "chip": "helio g99",
+   "ram_gb": [
+    4,
+    6,
+    8
+   ],
+   "release_year": 2024
+  },
+  "samsung galaxy a14": {
+   "chip": "exynos 1330",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2023
+  },
+  "samsung galaxy a05s": {
+   "chip": "snapdragon 680",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2023
+  },
+  "iphone 16 pro max": {
+   "chip": "a18 pro",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "iphone 16 pro": {
+   "chip": "a18 pro",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "iphone 16": {
+   "chip": "a18",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "iphone 15 pro max": {
+   "chip": "a17 pro",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2023
+  },
+  "iphone 15 pro": {
+   "chip": "a17 pro",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2023
+  },
+  "iphone 15": {
+   "chip": "a16 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2023
+  },
+  "iphone 14 pro max": {
+   "chip": "a16 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2022
+  },
+  "iphone 14 pro": {
+   "chip": "a16 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2022
+  },
+  "iphone 14": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2022
+  },
+  "iphone 13 pro max": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2021
+  },
+  "iphone 13 pro": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2021
+  },
+  "iphone 13": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2021
+  },
+  "iphone 13 mini": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2021
+  },
+  "iphone 12 pro": {
+   "chip": "a14 bionic",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2020
+  },
+  "iphone 12": {
+   "chip": "a14 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2020
+  },
+  "iphone 12 mini": {
+   "chip": "a14 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2020
+  },
+  "iphone 11 pro": {
+   "chip": "a13 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2019
+  },
+  "iphone 11": {
+   "chip": "a13 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2019
+  },
+  "iphone se 2022": {
+   "chip": "a15 bionic",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2022
+  },
+  "iphone xr": {
+   "chip": "a12 bionic",
+   "ram_gb": [
+    3
+   ],
+   "release_year": 2018
+  },
+  "iphone x": {
+   "chip": "a11 bionic",
+   "ram_gb": [
+    3
+   ],
+   "release_year": 2017
+  },
+  "xiaomi 14": {
+   "chip": "snapdragon 8 gen 3",
+   "ram_gb": [
+    12
+   ],
+   "release_year": 2024
+  },
+  "xiaomi 13t pro": {
+   "chip": "dimensity 9200",
+   "ram_gb": [
+    12,
+    16
+   ],
+   "release_year": 2023
+  },
+  "xiaomi 13t": {
+   "chip": "dimensity 8200",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2023
+  },
+  "xiaomi 12": {
+   "chip": "snapdragon 8 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2022
+  },
+  "xiaomi redmi note 14 pro": {
+   "chip": "dimensity 7300",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2025
+  },
+  "xiaomi redmi note 13 pro": {
+   "chip": "snapdragon 7 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "xiaomi redmi note 13": {
+   "chip": "snapdragon 685",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2024
+  },
+  "xiaomi redmi note 12 pro": {
+   "chip": "dimensity 1080",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "xiaomi redmi note 12": {
+   "chip": "snapdragon 685",
+   "ram_gb": [
+    4,
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "xiaomi redmi note 11": {
+   "chip": "snapdragon 680",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2022
+  },
+  "xiaomi poco x6 pro": {
+   "chip": "dimensity 8300",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "xiaomi poco x5 pro": {
+   "chip": "snapdragon 778g",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "xiaomi redmi 13c": {
+   "chip": "helio g85",
+   "ram_gb": [
+    4,
+    6,
+    8
+   ],
+   "release_year": 2023
+  },
+  "xiaomi redmi 12": {
+   "chip": "helio g88",
+   "ram_gb": [
+    4,
+    8
+   ],
+   "release_year": 2023
+  },
+  "honor magic 6 lite": {
+   "chip": "snapdragon 6 gen 1",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "honor 90": {
+   "chip": "snapdragon 7 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2023
+  },
+  "honor 200": {
+   "chip": "snapdragon 7 gen 3",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "honor 400": {
+   "chip": "snapdragon 7 gen 3",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2025
+  },
+  "honor 8x": {
+   "chip": "kirin 710",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2018
+  },
+  "honor 20 lite": {
+   "chip": "kirin 710",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2019
+  },
+  "huawei p30 pro": {
+   "chip": "kirin 980",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2019
+  },
+  "huawei p30": {
+   "chip": "kirin 980",
+   "ram_gb": [
+    6,
+    8
+   ],
+   "release_year": 2019
+  },
+  "huawei p30 lite": {
+   "chip": "kirin 710",
+   "ram_gb": [
+    4,
+    6
+   ],
+   "release_year": 2019
+  },
+  "huawei p20 lite": {
+   "chip": "kirin 710",
+   "ram_gb": [
+    4
+   ],
+   "release_year": 2018
+  },
+  "realme 12 pro": {
+   "chip": "snapdragon 6 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "realme 11 pro": {
+   "chip": "dimensity 7050",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2023
+  },
+  "oneplus 12": {
+   "chip": "snapdragon 8 gen 3",
+   "ram_gb": [
+    12,
+    16
+   ],
+   "release_year": 2024
+  },
+  "oneplus nord 3": {
+   "chip": "dimensity 9000",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2023
+  },
+  "google pixel 9 pro": {
+   "chip": "tensor g4",
+   "ram_gb": [
+    16
+   ],
+   "release_year": 2024
+  },
+  "google pixel 8a": {
+   "chip": "tensor g3",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2024
+  },
+  "google pixel 8": {
+   "chip": "tensor g3",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2023
+  },
+  "google pixel 7a": {
+   "chip": "tensor g2",
+   "ram_gb": [
+    8
+   ],
+   "release_year": 2023
+  },
+  "google pixel 6a": {
+   "chip": "tensor",
+   "ram_gb": [
+    6
+   ],
+   "release_year": 2022
+  },
+  "motorola edge 50": {
+   "chip": "snapdragon 7 gen 1",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "nothing 2a": {
+   "chip": "dimensity 7200",
+   "ram_gb": [
+    8,
+    12
+   ],
+   "release_year": 2024
+  },
+  "lenovo thinkpad t480": {
+   "chip": "i5-8350u",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2018
+  },
+  "lenovo thinkpad t14 gen 3": {
+   "chip": "i7-1260p",
+   "ram_gb": [
+    16,
+    32
+   ],
+   "release_year": 2022
+  },
+  "lenovo thinkpad x1 carbon": {
+   "chip": "i7-1165g7",
+   "ram_gb": [
+    16
+   ],
+   "release_year": 2021
+  },
+  "lenovo thinkpad x13": {
+   "chip": "i5-10210u",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2020
+  },
+  "lenovo ideapad 3": {
+   "chip": "ryzen 5 5500u",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "lenovo yoga 9": {
+   "chip": "core ultra 7 155h",
+   "ram_gb": [
+    16
+   ],
+   "release_year": 2024
+  },
+  "lenovo loq": {
+   "chip": "i5-13450hx",
+   "ram_gb": [
+    16
+   ],
+   "release_year": 2024
+  },
+  "hp elitebook 840 g8": {
+   "chip": "i5-1135g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "hp probook 450": {
+   "chip": "i5-1135g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "hp pavilion 15": {
+   "chip": "i5-1135g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "dell latitude 5420": {
+   "chip": "i5-1145g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "dell latitude 5580": {
+   "chip": "i5-7300u",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2017
+  },
+  "dell xps 13": {
+   "chip": "i7-1165g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "apple macbook air m1": {
+   "chip": "apple m1",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2020
+  },
+  "apple macbook air m2": {
+   "chip": "apple m2",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2022
+  },
+  "apple macbook pro m1": {
+   "chip": "apple m1",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2020
+  },
+  "asus vivobook 15": {
+   "chip": "i5-1135g7",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "asus zenbook 14": {
+   "chip": "i7-1165g7",
+   "ram_gb": [
+    16
+   ],
+   "release_year": 2021
+  },
+  "acer aspire 5": {
+   "chip": "ryzen 5 5500u",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2021
+  },
+  "acer nitro 5": {
+   "chip": "i5-10300h",
+   "ram_gb": [
+    8,
+    16
+   ],
+   "release_year": 2020
+  },
+  "microsoft surface laptop 4": {
+   "chip": "i7-1185g7",
+   "ram_gb": [
+    8,
+    16,
+    32
+   ],
+   "release_year": 2021
+  }
+ }
+}

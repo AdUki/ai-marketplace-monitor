@@ -114,6 +114,15 @@ def main(
         Optional[bool],
         typer.Option("--headless", help="If set to true, will not show the browser window."),
     ] = False,
+    update_benchmarks: Annotated[
+        bool,
+        typer.Option(
+            "--update-benchmarks",
+            help="Download the PassMark CPU/GPU/Android benchmark tables "
+            "(~300KB, about 11,000 entries) and exit. These answer most spec "
+            "lookups offline, with no AI call.",
+        ),
+    ] = False,
     warm_facts: Annotated[
         bool,
         typer.Option(
@@ -237,6 +246,19 @@ def main(
     logger.info(
         f"""{hilight("[VERSION]", "info")} AI Marketplace Monitor, version {hilight(__version__, "name")}"""
     )
+
+    if update_benchmarks:
+        from .benchmark_db import download, save
+
+        tables = download()
+        if any(tables.values()):
+            save(tables)
+            logger.info(
+                f"""{hilight("[Benchmarks]", "succ")} Saved {sum(len(t) for t in tables.values())} entries."""
+            )
+            sys.exit(0)
+        logger.error(f"""{hilight("[Benchmarks]", "fail")} Download failed.""")
+        sys.exit(1)
 
     if warm_facts:
         from .device_facts import warm_cache

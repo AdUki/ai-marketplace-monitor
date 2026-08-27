@@ -389,6 +389,65 @@ def has_real_facts(facts: Dict[str, Any]) -> bool:
     )
 
 
+def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
+    """Specs from downloaded/shipped data. No network call, no AI.
+
+    Order of preference:
+      1. PassMark's own tables -- ~2,800 CPUs and ~5,200 Android phones,
+         downloaded once. Authoritative and complete for laptops.
+      2. A shipped model -> chip -> score table, for the phones PassMark's
+         submission-driven device list happens not to carry (it has no
+         Galaxy S20, Redmi Note 12 or Honor 8X, for instance).
+    """
+    from . import benchmark_db as bdb
+
+    out: Dict[str, Any] = {}
+    if kind == "laptop":
+        hit = bdb.lookup_cpu(title)
+        if hit:
+            out.update(chip=hit[0], benchmark_name="passmark_cpu", benchmark_score=hit[1])
+    else:
+        hit = bdb.lookup_device(title)
+        if hit:
+            out.update(chip=hit[0], benchmark_name="passmark_device", benchmark_score=hit[1])
+
+    if not out:
+        chips = _load_chips()
+        key = model_key(title)
+        entry = None
+        for name, info in chips.get("models", {}).items():
+            if name in key or key in name:
+                if entry is None or len(name) > len(entry[0]):
+                    entry = (name, info)
+        if entry:
+            info = entry[1]
+            chip = info.get("chip", "")
+            out.update(chip=chip, ram_gb=info.get("ram_gb"),
+                       release_year=info.get("release_year"))
+            table = "cpu_passmark" if kind == "laptop" else "soc_antutu_v10"
+            score = chips.get(table, {}).get(chip)
+            if score:
+                out["benchmark_name"] = ("passmark_cpu" if kind == "laptop"
+                                         else "antutu_v10")
+                out["benchmark_score"] = score
+    if out:
+        out["source"] = "benchmark tables (no AI)"
+    return out
+
+
+_CHIPS_CACHE: Dict[str, Any] = {}
+
+
+def _load_chips() -> Dict[str, Any]:
+    if not _CHIPS_CACHE:
+        try:
+            path = Path(__file__).with_name("chips.json")
+            _CHIPS_CACHE.update(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            _CHIPS_CACHE["models"] = {}
+    return _CHIPS_CACHE
+
+
 def device_facts(model: str, refresh: bool = False, offline: bool = False, kind: str = "auto") -> Dict[str, Any]:
     """Facts for one model. Cached, so each model costs one lookup ever.
 
@@ -404,13 +463,17 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     if kind == "auto":
         kind = guess_kind(model)
     facts: Dict[str, Any] = {"query": model, "kind": kind}
-    api_key = "" if offline else os.environ.get("GROQ_API_KEY", "")
+    # Free, instant, deterministic. Only fall through to a web lookup for
+    # models no table knows about.
+    facts.update(facts_from_tables(model, kind))
+
+    api_key = "" if offline or has_real_facts(facts) else os.environ.get("GROQ_API_KEY", "")
     if api_key:
         try:
             facts.update(fetch_specs(model, api_key, kind=kind))
         except Exception as e:  # network/quota/parse - degrade, never crash
             facts["specs_error"] = str(e)[:200]
-    else:
+    elif not has_real_facts(facts):
         facts["specs_error"] = "offline" if offline else "GROQ_API_KEY not set"
 
     lo = lineage_supported(model)
