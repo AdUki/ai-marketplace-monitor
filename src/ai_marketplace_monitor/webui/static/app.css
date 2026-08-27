@@ -790,7 +790,21 @@ html, body {
   /* The line-number gutter costs scarce width and cannot be tapped usefully. */
   .gutter { display: none; }
 
-  .editor-with-gutter, #editor-host { min-height: 45vh; }
-  .logs-pane { min-height: 45vh; }
+  /* .app declares three rows (header / main / footer). The tab bar adds a
+     fourth laid-out child on mobile, which pushed .main out of the 1fr row
+     and let it size to its content -- so the editor grew past the screen and
+     the console no longer fit. Declare the row explicitly for this layout.
+     (On desktop the nav is display:none and removed from grid flow, so the
+     three-row rule there still applies.) */
+  .app { grid-template-rows: auto auto 1fr auto; }
+
+  /* Panes fill exactly the row they are given and scroll internally, rather
+     than claiming a fixed slice of the viewport. A min-height in vh added to
+     the header, tabs and toolbars is precisely what overflows a short screen. */
+  .main, .main > section { min-height: 0; }
+  .editor-pane, .logs-pane { min-height: 0; overflow: hidden; }
+  .editor-with-gutter { min-height: 0; flex: 1 1 auto; overflow: auto; }
+  #editor-host { min-height: 0; }
+  .logs-body { min-height: 0; flex: 1 1 auto; overflow: auto; }
   .log-line, .logs-body { overflow-wrap: anywhere; word-break: break-word; }
 }
