@@ -337,6 +337,21 @@ class PushNotificationConfig(NotificationConfig):
             else:
                 desc = listing.description[: self.with_description] + "..."
 
+            # Specs line for the notification: the AI summary is capped at 30
+            # words and often spends them on price reasoning, so the hardware
+            # facts (AnTuTu/PassMark, RAM, quality score) would otherwise never
+            # reach the phone. Cache-only, so this cannot slow a send down or
+            # fail it; absent facts simply omit the line.
+            specs = ""
+            try:
+                from .device_facts import facts_for_listing, summarize
+
+                _f = facts_for_listing(listing.title)
+                if _f and (_f.get("benchmark_score") or _f.get("score") is not None):
+                    specs = summarize(_f)
+            except Exception:  # noqa: BLE001 - a notification must still go out
+                specs = ""
+
             if self.message_format == "plain_text":
                 desc_newline = "\n" if desc else ""
                 msg = (
@@ -349,7 +364,8 @@ class PushNotificationConfig(NotificationConfig):
                         f"[{rating.conclusion} ({rating.score})] {listing.title}\n"
                         f"{listing.price}, {listing.location}\n"
                         f"{listing.post_url.split('?')[0]}\n{desc}{desc_newline}"
-                        f"\nAI: {rating.comment}"
+                        + (f"\nSpecs: {specs}" if specs else "")
+                        + f"\nAI: {rating.comment}"
                     )
                 )
             elif self.message_format == "markdown":
@@ -366,7 +382,8 @@ class PushNotificationConfig(NotificationConfig):
                         f"[**{listing.title}**]({listing.post_url.split('?')[0]})\n"
                         f"{listing.price}, {listing.location}\n"
                         f"{desc}{desc_newline}"
-                        f"\n**AI**: {rating.comment}"
+                        + (f"\n**Specs**: {specs}" if specs else "")
+                        + f"\n**AI**: {rating.comment}"
                     )
                 )
             elif self.message_format == "html":
