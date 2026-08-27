@@ -812,12 +812,16 @@ html, body {
      are sized for a desktop and are the remaining reason the page is wider
      than the viewport. */
   .login-form { min-width: 0; width: 100%; }
-  .add-menu, .section-menu { min-width: 0; max-width: calc(100vw - 24px); }
+  .add-menu, .section-menu { min-width: 0; max-width: calc(100% - 24px); }
   #log-filter { min-width: 0; flex: 1 1 auto; }
 
   /* The editor scroller must clip, not stretch its parent. */
   .cm-editor, .cm-scroller, .cm-content { max-width: 100%; }
-  .cm-scroller { overflow-x: auto; }
+  /* Line wrapping alone does not break a long unbroken token, and this config
+     is full of them (https://console.groq.com/..., base_url values). Those
+     kept the editor -- and so the page -- a few pixels wider than the screen. */
+  .cm-content, .cm-line { overflow-wrap: anywhere; word-break: break-word; }
+  .cm-scroller { overflow-x: hidden; }
 
   /* Hard clamp to the viewport. A single unshrinkable child (a nowrap path,
      a button row) otherwise widens .app itself, and once the container is
@@ -825,11 +829,11 @@ html, body {
      the header, tabs, status bar and footer all ran off the edge together. */
   .app {
     width: 100%;
-    max-width: 100vw;
+    max-width: 100%;
     overflow-x: hidden;
   }
   .app * { max-width: 100%; min-width: 0; }
-  .header, .header-left, .header-right, .pane-tabs, .main { max-width: 100vw; }
+  .header, .header-left, .header-right, .pane-tabs, .main { max-width: 100%; }
 
   /* The config path is an absolute path that cannot usefully shrink and has
      no value on a phone -- the console edits one file. Hiding it removes the
