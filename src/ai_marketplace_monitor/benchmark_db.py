@@ -32,6 +32,20 @@ except ImportError:  # running standalone
     CACHE_DIR = Path.home() / ".ai-marketplace-monitor"
 
 DB_PATH = CACHE_DIR / "benchmarks.json"
+# Entries learned from the web for devices PassMark does not list. Kept in a
+# separate file so a re-download of the upstream tables never discards them,
+# and so it can be inspected or hand-edited like any other data file.
+LOCAL_PATH = CACHE_DIR / "benchmarks_local.json"
+
+# Plausible ranges, used to reject a bad answer before it is written. A wrong
+# number that is stored is worse than a missing one: it is then trusted
+# offline, forever, without another look.
+VALID_RANGE = {
+    "device": (500, 60_000),        # PassMark Android; table max is ~31,000
+    "cpu": (100, 200_000),          # PassMark CPU Mark; table max is ~131,000
+    "gpu": (50, 100_000),           # G3D Mark; table max is ~42,000
+    "antutu": (20_000, 4_000_000),  # AnTuTu v10 totals
+}
 MAX_AGE = 30 * 24 * 3600  # PassMark updates continuously; monthly is plenty
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
 
@@ -80,11 +94,52 @@ def save(tables: Dict[str, Dict[str, int]]) -> None:
     tmp.replace(DB_PATH)
 
 
+def load_local() -> Dict[str, Dict[str, int]]:
+    try:
+        return json.loads(LOCAL_PATH.read_text()).get("tables", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def add_entry(kind: str, name: str, score: int, source: str = "web") -> bool:
+    """Record a looked-up benchmark so it is never looked up again.
+
+    Returns False (and stores nothing) if the value is implausible for its
+    kind -- a stored wrong number would be trusted offline from then on.
+    """
+    lo, hi = VALID_RANGE.get(kind, (0, 10**9))
+    if not isinstance(score, int) or isinstance(score, bool) or not lo <= score <= hi:
+        return False
+    name = (name or "").strip()
+    if not name:
+        return False
+    blob: Dict[str, Any]
+    try:
+        blob = json.loads(LOCAL_PATH.read_text())
+    except (OSError, ValueError):
+        blob = {"tables": {}, "meta": {}}
+    blob.setdefault("tables", {}).setdefault(kind, {})[name] = score
+    blob.setdefault("meta", {})[f"{kind}:{name}"] = {"source": source, "at": int(time.time())}
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = LOCAL_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(blob, indent=1, ensure_ascii=False))
+    tmp.replace(LOCAL_PATH)
+    return True
+
+
 def load(auto_download: bool = True, verbose: bool = False) -> Dict[str, Dict[str, int]]:
+    def _merge(tables: Dict[str, Dict[str, int]]) -> Dict[str, Dict[str, int]]:
+        # Locally learned entries win: they exist precisely because upstream
+        # had nothing.
+        merged = {k: dict(v) for k, v in tables.items()}
+        for kind, rows in load_local().items():
+            merged.setdefault(kind, {}).update(rows)
+        return merged
+
     try:
         blob = json.loads(DB_PATH.read_text())
         if blob.get("fetched_at", 0) + MAX_AGE > time.time():
-            return blob.get("tables", {})
+            return _merge(blob.get("tables", {}))
     except (OSError, ValueError):
         blob = None
     if not auto_download:
@@ -92,8 +147,8 @@ def load(auto_download: bool = True, verbose: bool = False) -> Dict[str, Dict[st
     tables = download(verbose=verbose)
     if any(tables.values()):
         save(tables)
-        return tables
-    return (blob or {}).get("tables", {})
+        return _merge(tables)
+    return _merge((blob or {}).get("tables", {}))
 
 
 # --------------------------------------------------------------------------

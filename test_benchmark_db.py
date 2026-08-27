@@ -130,3 +130,53 @@ class TestSlovakTransliteration(unittest.TestCase):
     def test_accented_listing_matches_plain_table_entry(self):
         got = b.match_device("Predám Samsung Galaxy A54 – zánovný", DEVICES)
         self.assertEqual(got[0], "Samsung Galaxy A54")
+
+
+class TestLearnedEntries(unittest.TestCase):
+    """Web lookups must enrich the local database, and only when sane."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self._orig = (b.CACHE_DIR, b.LOCAL_PATH, b.DB_PATH)
+        b.CACHE_DIR = Path(self.tmp.name)
+        b.LOCAL_PATH = b.CACHE_DIR / "benchmarks_local.json"
+        b.DB_PATH = b.CACHE_DIR / "benchmarks.json"
+        self.addCleanup(self.tmp.cleanup)
+
+    def tearDown(self):
+        b.CACHE_DIR, b.LOCAL_PATH, b.DB_PATH = self._orig
+
+    def test_plausible_value_is_stored(self):
+        self.assertTrue(b.add_entry("device", "Honor 8X", 5200))
+        self.assertEqual(b.load_local()["device"]["Honor 8X"], 5200)
+
+    def test_implausible_values_are_refused(self):
+        for kind, bad in (("device", 9_000_000), ("cpu", -3), ("antutu", 5),
+                          ("gpu", 0)):
+            self.assertFalse(b.add_entry(kind, "Bogus", bad), (kind, bad))
+        self.assertEqual(b.load_local(), {})
+
+    def test_bool_is_not_a_score(self):
+        self.assertFalse(b.add_entry("device", "Bogus", True))
+
+    def test_empty_name_refused(self):
+        self.assertFalse(b.add_entry("device", "   ", 5000))
+
+    def test_learned_entry_is_matchable(self):
+        b.add_entry("device", "Samsung Galaxy A05s", 4200)
+        b.save({"device": {}})           # upstream table has nothing
+        got = b.match_device("Predám Samsung Galaxy A05s 4/64",
+                             b.load(auto_download=False).get("device", {}))
+        self.assertIsNotNone(got)
+        self.assertEqual(got[1], 4200)
+
+    def test_local_survives_upstream_refresh(self):
+        b.add_entry("device", "Honor 8X", 5200)
+        b.save({"device": {"Something Else": 1}})   # simulate a re-download
+        self.assertEqual(b.load(auto_download=False)["device"]["Honor 8X"], 5200)
+
+    def test_local_overrides_upstream(self):
+        b.save({"device": {"Honor 8X": 1}})
+        b.add_entry("device", "Honor 8X", 5200)
+        self.assertEqual(b.load(auto_download=False)["device"]["Honor 8X"], 5200)

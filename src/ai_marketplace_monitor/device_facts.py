@@ -381,6 +381,33 @@ def fetch_specs(model: str, api_key: str, kind: str = "auto", timeout: int = 45)
     raise last_err or RuntimeError("spec lookup failed")
 
 
+def _record_to_database(facts: Dict[str, Any], kind: str) -> None:
+    """Write a web-looked-up benchmark into the local database.
+
+    The point is that it is looked up ONCE, ever: the next listing for the
+    same phone -- and for anyone else running this -- is answered offline
+    from the table. Values are range-checked first, and anything from a
+    non-searching fallback model is refused, since those answer from
+    memory rather than from a source and are not worth freezing into a
+    database.
+    """
+    from . import benchmark_db as bdb
+
+    score = facts.get("benchmark_score")
+    name = facts.get("model") or facts.get("query")
+    if not score or not name or facts.get("unverified"):
+        return
+    bench = (facts.get("benchmark_name") or "").lower()
+    table = ("cpu" if "passmark_cpu" in bench
+             else "device" if "passmark_device" in bench
+             else "antutu" if "antutu" in bench
+             else None)
+    if table is None:
+        return
+    if bdb.add_entry(table, str(name), int(score), source=facts.get("looked_up_by", "web")):
+        facts["stored_in_db"] = True
+
+
 def has_real_facts(facts: Dict[str, Any]) -> bool:
     """True when an entry holds actual looked-up data, not just a failed try.
 
@@ -417,6 +444,12 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
         hit = bdb.lookup_device(title)
         if hit:
             out.update(chip=hit[0], benchmark_name="passmark_device", benchmark_score=hit[1])
+        else:
+            # Entries learned from earlier web lookups, stored as AnTuTu.
+            learned = bdb.match_device(title, bdb.load(auto_download=False).get("antutu", {}))
+            if learned:
+                out.update(chip=learned[0], benchmark_name="antutu_v10",
+                           benchmark_score=learned[1])
 
     if not out:
         chips = _load_chips()
@@ -477,7 +510,9 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     api_key = "" if offline or has_real_facts(facts) else os.environ.get("GROQ_API_KEY", "")
     if api_key:
         try:
-            facts.update(fetch_specs(model, api_key, kind=kind))
+            looked_up = fetch_specs(model, api_key, kind=kind)
+            facts.update(looked_up)
+            _record_to_database(facts, kind)
         except Exception as e:  # network/quota/parse - degrade, never crash
             facts["specs_error"] = str(e)[:200]
     elif not has_real_facts(facts):
