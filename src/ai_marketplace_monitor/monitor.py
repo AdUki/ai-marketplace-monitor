@@ -1,3 +1,4 @@
+import re
 import sys
 import time
 from logging import Logger
@@ -619,6 +620,24 @@ class MarketplaceMonitor:
             self.keyboard_monitor.stop()
         cache.close()
 
+    def resolve_share_url(self: "MarketplaceMonitor", share_url: str) -> str:
+        """Follow a facebook.com/share/... link to the marketplace item URL.
+
+        These are opaque redirects that Facebook only resolves for a logged-in
+        session, so this drives the real browser rather than a plain HTTP
+        request, and strips the tracking query string off the result.
+        """
+        if self.browser is None:
+            self.browser = self._launch_browser()
+        page = self.browser.new_page()
+        try:
+            page.goto(share_url, wait_until="commit", timeout=45000)
+            page.wait_for_timeout(5000)
+            resolved = page.url
+        finally:
+            page.close()
+        return resolved.split("?")[0]
+
     def check_items(
         self: "MarketplaceMonitor", items: List[str] | None = None, for_item: str | None = None
     ) -> None:
@@ -641,8 +660,27 @@ class MarketplaceMonitor:
             if post_url.isnumeric():
                 post_url = f"https://www.facebook.com/marketplace/item/{post_url}/"
 
+            # Accept the share links the Facebook app/website actually hands
+            # you ("Copy link" produces facebook.com/share/<id>/, and mobile
+            # uses m./web./fb.com hosts). Previously only the canonical
+            # www.facebook.com/marketplace/item form was allowed, so pasting
+            # the link straight from Facebook just errored out.
+            post_url = re.sub(
+                r"^https?://(?:www\.|m\.|web\.|mbasic\.)?(?:facebook\.com|fb\.com)",
+                "https://www.facebook.com",
+                post_url,
+            )
+            if re.match(r"^https://www\.facebook\.com/share/", post_url):
+                # A share link is an opaque redirect; resolve it in the browser
+                # (it needs the logged-in session) to get the real item URL.
+                post_url = self.resolve_share_url(post_url)
+
             if not post_url.startswith("https://www.facebook.com/marketplace/item"):
-                raise ValueError(f"URL {post_url} is not a valid Facebook Marketplace URL.")
+                raise ValueError(
+                    f"URL {post_url} is not a valid Facebook Marketplace URL. "
+                    "Expected a marketplace item link, a facebook.com/share/... "
+                    "link, or a bare numeric item id."
+                )
             post_urls.append(post_url)
 
         if not post_urls:

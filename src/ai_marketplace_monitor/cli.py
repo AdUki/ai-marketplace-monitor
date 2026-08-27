@@ -189,7 +189,13 @@ def main(
         from .webui.log_handler import LogBroadcastHandler
 
         log_broadcast_handler = LogBroadcastHandler(capacity=webui_log_retention)
-        log_broadcast_handler.setLevel(logging.DEBUG)
+        # Respect --verbose, exactly like the console handler above. This was
+        # pinned to DEBUG unconditionally, so the web UI log view always got
+        # the full firehose -- playwright internals, HTTP connection traces,
+        # and multi-screen repr dumps of the whole config for every listing --
+        # which buried the events a human actually wants (searches run,
+        # ratings given, notifications sent) to the point of being useless.
+        log_broadcast_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
         log_handlers.append(log_broadcast_handler)
 
     logging.basicConfig(
@@ -198,13 +204,23 @@ def main(
         handlers=log_handlers,
     )
 
-    # remove logging from other packages.
+    # remove logging from other packages. These emit per-request/per-frame
+    # chatter that is noise in both the console and the web UI log view.
     for logger_name in (
         "asyncio",
         "openai._base_client",
+        "openai",
         "httpcore.connection",
         "httpcore.http11",
+        "httpcore",
         "httpx",
+        "urllib3",
+        "urllib3.connectionpool",
+        "requests",
+        "playwright",
+        "watchdog",
+        "PIL",
+        "markdown_it",
     ):
         logging.getLogger(logger_name).setLevel(logging.ERROR)
 
