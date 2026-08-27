@@ -580,8 +580,15 @@ def warm_cache(limit: int = 5, verbose: bool = True) -> int:
     if not pending:
         return 0
     done = 0
-    for key, info in list(pending.items())[:limit]:
+    for idx, (key, info) in enumerate(list(pending.items())[:limit]):
         title = info.get("title", key)
+        # Pace the batch. An agentic search costs roughly a third of the
+        # per-minute token allowance, and that allowance is shared with the
+        # monitor's own evaluations, so firing a batch back-to-back exhausts
+        # it within seconds and the rest fails on 429 -- which is what left
+        # the cache empty while the daily quota still looked healthy.
+        if idx:
+            time.sleep(25)
         try:
             facts = device_facts(title, refresh=True, kind=info.get("kind", "auto"))
             if verbose:
