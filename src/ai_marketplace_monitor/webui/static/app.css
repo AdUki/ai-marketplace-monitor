@@ -807,4 +807,18 @@ html, body {
   #editor-host { min-height: 0; }
   .logs-body { min-height: 0; flex: 1 1 auto; overflow: auto; }
   .log-line, .logs-body { overflow-wrap: anywhere; word-break: break-word; }
+
+  /* Nothing may declare a width larger than the screen. These fixed minimums
+     are sized for a desktop and are the remaining reason the page is wider
+     than the viewport. */
+  .login-form { min-width: 0; width: 100%; }
+  .add-menu, .section-menu { min-width: 0; max-width: calc(100vw - 24px); }
+  #log-filter { min-width: 0; flex: 1 1 auto; }
+
+  /* The editor scroller must clip, not stretch its parent. */
+  .cm-editor, .cm-scroller, .cm-content { max-width: 100%; }
+  .cm-scroller { overflow-x: auto; }
+
+  /* Belt and braces: no descendant of the app may exceed the viewport. */
+  .app, .app * { max-width: 100%; }
 }

@@ -159,7 +159,11 @@
       indentUnit: 2,
       tabSize: 2,
       indentWithTabs: false,
-      lineWrapping: false,
+      // Wrap on narrow screens. Without this the editor is as wide as the
+      // longest line in the file -- and this config has very long ones (the
+      // AI prompt, a 40-entry antikeywords array) -- which drags the whole
+      // page wider than the phone regardless of what the containers say.
+      lineWrapping: window.matchMedia("(max-width: 820px)").matches,
       extraKeys: {
         "Cmd-S": () => saveConfig(),
         "Ctrl-S": () => saveConfig(),
