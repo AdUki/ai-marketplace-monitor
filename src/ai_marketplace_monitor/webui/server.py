@@ -31,7 +31,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..utils import cache
@@ -48,7 +48,7 @@ from .auth import (
 )
 from .config_api import ConfigFileService
 from .config_auth import extract_credentials
-from .found_export import iter_found_csv, iter_found_rows
+from .found_export import build_found_rows, iter_found_csv, iter_found_rows
 from .log_handler import LogBroadcastHandler
 
 # Ensure the vendored toml-edit-js WASM bundle is served with the right
@@ -480,7 +480,163 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @app.get("/api/items")
+    def api_items(_: str = Depends(require_session)) -> JSONResponse:
+        """Everything known about each matched listing, for the item browser.
+
+        Joins the notified rows with cached listing details and AI ratings
+        (build_found_rows), then enriches each with the verified device facts
+        looked up per model. Read-only and cache-only: no scraping, no network.
+        """
+        rows = build_found_rows(cache)
+        try:
+            from ..device_facts import facts_for_listing
+        except Exception:  # noqa: BLE001
+            facts_for_listing = None  # type: ignore[assignment]
+
+        out = []
+        for r in rows:
+            item = dict(r)
+            if facts_for_listing is not None:
+                try:
+                    f = facts_for_listing(r.get("title", "")) or {}
+                    item["specs"] = {
+                        k: f.get(k)
+                        for k in (
+                            "chip", "benchmark_name", "benchmark_score", "ram_gb",
+                            "storage_gb", "used_price_eur", "release_year", "score",
+                            "verdict", "confidence", "lineageos_official",
+                            "lineageos_unofficial",
+                        )
+                        if f.get(k) is not None
+                    }
+                except Exception:  # noqa: BLE001 - browser must still render
+                    item["specs"] = {}
+            out.append(item)
+        out.reverse()  # newest first
+        return JSONResponse({"items": out, "count": len(out)})
+
+    @app.get("/items")
+    def items_page(_: str = Depends(require_session)) -> HTMLResponse:
+        return HTMLResponse(ITEMS_PAGE)
+
     return app
+
+
+# Mobile-first item browser. Deliberately self-contained (no build step, no
+# framework, no external requests) and served as one string: the existing SPA
+# is a 67KB bundle whose layout assumes a desktop viewport, and this needs to
+# be usable one-handed on a phone while standing in front of a seller.
+ITEMS_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Deals</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#272b35;--fg:#e8eaed;--dim:#9aa0aa;
+      --good:#37b24d;--ok:#f59f00;--bad:#e03131;--link:#4dabf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+     padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{position:sticky;top:0;z-index:5;background:var(--bg);
+       border-bottom:1px solid var(--line);padding:10px 12px}
+h1{font-size:17px;margin:0 0 8px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+input,select{background:var(--card);color:var(--fg);border:1px solid var(--line);
+             border-radius:8px;padding:9px 10px;font-size:16px;flex:1 1 130px;min-width:0}
+main{padding:12px;display:grid;gap:12px;max-width:900px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;overflow-wrap:anywhere}
+.top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.title{font-weight:600;margin:0;font-size:15px}
+.badge{flex:none;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;color:#0b0d10}
+.r5,.r4{background:var(--good)}.r3{background:var(--ok)}.r2,.r1{background:var(--bad)}
+.price{font-size:20px;font-weight:700;margin:6px 0 2px}
+.meta{color:var(--dim);font-size:13px}
+.specs{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:#20242c;border:1px solid var(--line);border-radius:7px;
+      padding:3px 7px;font-size:12px;color:var(--dim)}
+.chip b{color:var(--fg);font-weight:600}
+.q{font-weight:700}.q.good{color:var(--good)}.q.ok{color:var(--ok)}.q.weak{color:var(--bad)}
+.ai{margin-top:9px;font-size:13px;color:var(--fg);background:#12151b;
+    border-left:3px solid var(--link);padding:7px 9px;border-radius:0 7px 7px 0}
+.desc{margin-top:8px;font-size:13px;color:var(--dim);white-space:pre-wrap;
+      max-height:4.4em;overflow:hidden}
+.desc.open{max-height:none}
+a.go{display:inline-block;margin-top:10px;background:var(--link);color:#08101c;
+     text-decoration:none;font-weight:700;padding:9px 13px;border-radius:9px}
+.more{margin-top:6px;color:var(--link);font-size:12px;cursor:pointer;
+      background:none;border:0;padding:0}
+.empty{color:var(--dim);text-align:center;padding:36px 12px}
+</style></head><body>
+<header>
+  <h1>Deals <span id="n" class="meta"></span></h1>
+  <div class="controls">
+    <input id="q" placeholder="Search title, seller, AI note...">
+    <select id="min"><option value="0">any rating</option><option value="3">3+</option>
+      <option value="4">4+</option><option value="5">5 only</option></select>
+    <select id="sort"><option value="new">newest</option><option value="rating">rating</option>
+      <option value="quality">quality</option><option value="cheap">cheapest</option></select>
+  </div>
+</header>
+<main id="list"><div class="empty">Loading...</div></main>
+<script>
+const E=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=(s)=>{const m=String(s??"").replace(/[ ,]/g,"").match(/-?\\d+(\\.\\d+)?/);return m?parseFloat(m[0]):null};
+let ITEMS=[];
+function specChips(s){
+  if(!s) return "";
+  const c=[];
+  if(s.chip) c.push(`<span class="chip"><b>${E(s.chip)}</b></span>`);
+  if(s.benchmark_score) c.push(`<span class="chip">${E((s.benchmark_name||"bench").replace("_"," "))} <b>${s.benchmark_score.toLocaleString()}</b></span>`);
+  if(s.ram_gb&&s.ram_gb.length) c.push(`<span class="chip">RAM <b>${s.ram_gb.join("/")}GB</b></span>`);
+  if(s.storage_gb&&s.storage_gb.length) c.push(`<span class="chip">disk <b>${s.storage_gb.join("/")}GB</b></span>`);
+  if(s.used_price_eur) c.push(`<span class="chip">used ~<b>EUR ${s.used_price_eur}</b></span>`);
+  if(s.release_year) c.push(`<span class="chip">${s.release_year}</span>`);
+  if(s.lineageos_official) c.push(`<span class="chip"><b>LineageOS</b> official</span>`);
+  else if(s.lineageos_unofficial) c.push(`<span class="chip"><b>LineageOS</b> unofficial</span>`);
+  if(s.score!=null){
+    const k=s.score>=55?"good":s.score>=35?"ok":"weak";
+    c.push(`<span class="chip">quality <b class="q ${k}">${s.score}/100</b>${s.confidence==="low"?" (unverified)":""}</span>`);
+  }
+  return `<div class="specs">${c.join("")}</div>`;
+}
+function card(it,i){
+  const r=parseInt(it.rating)||0, s=it.specs||{};
+  return `<div class="card">
+    <div class="top"><p class="title">${E(it.title)}</p>
+      ${r?`<span class="badge r${r}">${r}</span>`:""}</div>
+    <div class="price">${E(it.price||"?")}</div>
+    <div class="meta">${E(it.location||"")}${it.seller?" &middot; "+E(it.seller):""}${it.condition?" &middot; "+E(it.condition):""}</div>
+    <div class="meta">${E(it.item||"")}${it.found_at?" &middot; "+E(it.found_at):""}</div>
+    ${specChips(s)}
+    ${it.ai_comment?`<div class="ai">${E(it.ai_comment)}</div>`:""}
+    ${it.description?`<div class="desc" id="d${i}">${E(it.description)}</div>
+      <button class="more" onclick="document.getElementById('d${i}').classList.toggle('open')">show more / less</button>`:""}
+    ${it.url?`<a class="go" href="${E(it.url)}" target="_blank" rel="noopener">Open on Facebook</a>`:""}
+  </div>`;
+}
+function render(){
+  const q=document.getElementById("q").value.toLowerCase();
+  const min=parseInt(document.getElementById("min").value)||0;
+  const sort=document.getElementById("sort").value;
+  let v=ITEMS.filter(it=>(parseInt(it.rating)||0)>=min).filter(it=>!q||
+    [it.title,it.seller,it.ai_comment,it.item,it.description].join(" ").toLowerCase().includes(q));
+  if(sort==="rating") v.sort((a,b)=>(parseInt(b.rating)||0)-(parseInt(a.rating)||0));
+  if(sort==="quality") v.sort((a,b)=>((b.specs||{}).score??-1)-((a.specs||{}).score??-1));
+  if(sort==="cheap") v.sort((a,b)=>(num(a.price)??1e9)-(num(b.price)??1e9));
+  document.getElementById("n").textContent=`(${v.length}/${ITEMS.length})`;
+  document.getElementById("list").innerHTML=v.length?v.map(card).join(""):
+    '<div class="empty">Nothing matches. Matches appear here once the monitor rates a listing highly enough to notify.</div>';
+}
+fetch("/api/items",{credentials:"same-origin"}).then(r=>{
+  if(r.status===401){location.href="/";return null} return r.json()})
+ .then(d=>{if(!d)return;ITEMS=d.items||[];render()})
+ .catch(e=>{document.getElementById("list").innerHTML=
+   '<div class="empty">Could not load items: '+E(e.message)+'</div>'});
+["q","min","sort"].forEach(id=>document.getElementById(id)
+  .addEventListener("input",render));
+</script></body></html>"""
 
 
 # ----------------------------------------------------------------------
