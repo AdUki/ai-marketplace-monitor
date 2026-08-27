@@ -42,6 +42,7 @@ LOCAL_PATH = CACHE_DIR / "benchmarks_local.json"
 # offline, forever, without another look.
 VALID_RANGE = {
     "device": (500, 60_000),        # PassMark Android; table max is ~31,000
+    "device_cpu": (100, 40_000),    # Android CPU Mark; table max is ~19,000
     "cpu": (100, 200_000),          # PassMark CPU Mark; table max is ~131,000
     "gpu": (50, 100_000),           # G3D Mark; table max is ~42,000
     "antutu": (20_000, 4_000_000),  # AnTuTu v10 totals
@@ -57,6 +58,12 @@ SOURCES = {
     "device": ("https://www.androidbenchmark.net/device_list.php",
                r'<tr><td><a href="/phone\.php\?phone=[^"]*">([^<]+)</a></td>'
                r'<td><a href="passmark_lookup\.php[^"]*">([\d,]+)</a></td>'),
+    # A second phone table, listing CPU Mark instead of the overall device
+    # score. Worth having because its coverage differs -- it carries models
+    # the device list omits (the Galaxy S20 among them) -- and it is the
+    # closest thing to a per-SoC number that is actually published in bulk.
+    # Different markup: <li> blocks, not table rows.
+    "device_cpu": ("https://www.androidbenchmark.net/cpumark_chart.html", None),
 }
 
 
@@ -66,8 +73,19 @@ def _fetch(url: str, timeout: int = 60) -> str:
         return r.read().decode("utf-8", "replace")
 
 
+def _parse_chart(page: str) -> Dict[str, int]:
+    """Parse the <li>-based chart pages (name and score in separate spans)."""
+    rows: Dict[str, int] = {}
+    for block in page.split('<li id="rk')[1:]:
+        name = re.search(r'<span class="prdname">([^<]+)</span>', block)
+        count = re.search(r'<span class="count">([\d,]+)</span>', block)
+        if name and count:
+            rows[html.unescape(name.group(1)).strip()] = int(count.group(1).replace(",", ""))
+    return rows
+
+
 def download(verbose: bool = True) -> Dict[str, Dict[str, int]]:
-    """Fetch and parse every list. ~300KB total."""
+    """Fetch and parse every list. A few MB, once."""
     tables: Dict[str, Dict[str, int]] = {}
     for kind, (url, pattern) in SOURCES.items():
         try:
@@ -77,10 +95,13 @@ def download(verbose: bool = True) -> Dict[str, Dict[str, int]]:
                 print(f"  {kind}: download failed ({e})")
             tables[kind] = {}
             continue
-        rows = {
-            html.unescape(n).strip(): int(v.replace(",", ""))
-            for n, v in re.findall(pattern, page, re.I)
-        }
+        rows = (
+            _parse_chart(page) if pattern is None
+            else {
+                html.unescape(n).strip(): int(v.replace(",", ""))
+                for n, v in re.findall(pattern, page, re.I)
+            }
+        )
         tables[kind] = rows
         if verbose:
             print(f"  {kind}: {len(rows)} entries")
@@ -310,8 +331,13 @@ def match_component(query: str, table: Dict[str, int]) -> Optional[Tuple[str, in
 
 
 def lookup_device(title: str) -> Optional[Tuple[str, int]]:
-    """PassMark score for an Android phone, by listing title."""
+    """PassMark overall score for an Android phone, by listing title."""
     return match_device(title, load(auto_download=False).get("device", {}))
+
+
+def lookup_device_cpu(title: str) -> Optional[Tuple[str, int]]:
+    """Android CPU Mark, for phones the overall-score table omits."""
+    return match_device(title, load(auto_download=False).get("device_cpu", {}))
 
 
 def lookup_cpu(text: str) -> Optional[Tuple[str, int]]:

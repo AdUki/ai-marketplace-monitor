@@ -243,6 +243,7 @@ good working condition."""
 # PassMark phone score of 9,587 read as an AnTuTu total scores 0/100.
 BENCHMARK_CEILING = {
     "passmark_device": 24_000,   # p99 of the Android device table
+    "android_cpumark": 13_000,   # p99 of the Android CPU Mark chart
     "passmark_gpu": 28_000,      # p99 of the GPU table
     "antutu_v10": 2_000_000,   # current flagship phones land around here
     "antutu_v9": 1_000_000,    # v9 scores run roughly half of v10
@@ -444,6 +445,11 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
         hit = bdb.lookup_device(title)
         if hit:
             out.update(chip=hit[0], benchmark_name="passmark_device", benchmark_score=hit[1])
+        elif bdb.lookup_device_cpu(title):
+            # Second phone table: different coverage, CPU Mark rather than the
+            # overall score, so it has its own scale.
+            hit = bdb.lookup_device_cpu(title)
+            out.update(chip=hit[0], benchmark_name="android_cpumark", benchmark_score=hit[1])
         else:
             # Entries learned from earlier web lookups, stored as AnTuTu.
             learned = bdb.match_device(title, bdb.load(auto_download=False).get("antutu", {}))
