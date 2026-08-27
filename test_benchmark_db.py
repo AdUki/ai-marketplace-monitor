@@ -99,3 +99,34 @@ class TestCpuMatching(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
+
+
+class TestSlovakTransliteration(unittest.TestCase):
+    """Every Slovak diacritic must fold to its plain ASCII letter."""
+
+    PAIRS = [
+        ("á", "a"), ("ä", "a"), ("č", "c"), ("ď", "d"), ("é", "e"), ("í", "i"),
+        ("ĺ", "l"), ("ľ", "l"), ("ň", "n"), ("ó", "o"), ("ô", "o"), ("ŕ", "r"),
+        ("š", "s"), ("ť", "t"), ("ú", "u"), ("ý", "y"), ("ž", "z"),
+    ]
+
+    def test_every_letter_lower_and_upper(self):
+        for ch, plain in self.PAIRS:
+            self.assertEqual(b._norm(ch), plain, ch)
+            self.assertEqual(b._norm(ch.upper()), plain, ch.upper())
+
+    def test_no_letter_is_dropped(self):
+        for ch, _ in self.PAIRS:
+            self.assertTrue(b._norm(ch), f"{ch} vanished")
+
+    def test_real_words(self):
+        for word, plain in [
+            ("Predám", "predam"), ("Úplne nový", "uplne novy"),
+            ("Sušička", "susicka"), ("nefunkčný", "nefunkcny"),
+            ("Príslušenstvo", "prislusenstvo"), ("čierny", "cierny"),
+        ]:
+            self.assertEqual(b._norm(word), plain, word)
+
+    def test_accented_listing_matches_plain_table_entry(self):
+        got = b.match_device("Predám Samsung Galaxy A54 – zánovný", DEVICES)
+        self.assertEqual(got[0], "Samsung Galaxy A54")
