@@ -168,3 +168,27 @@ class TestBenchmarkSelection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
+
+
+class TestBenchmarkScales(unittest.TestCase):
+    """Every benchmark must be scored against its own scale."""
+
+    def test_passmark_device_has_a_ceiling(self):
+        """Without one it is measured as AnTuTu and scores ~0."""
+        self.assertIn("passmark_device", df.BENCHMARK_CEILING)
+        r = df.quality_score({"kind": "phone", "benchmark_name": "passmark_device",
+                              "benchmark_score": 9587, "ram_gb": [8]})
+        self.assertGreater(r["score"], 35, "a decent phone must not score as junk")
+
+    def test_scales_agree_for_comparable_devices(self):
+        """The same phone should rate alike whichever table supplied it."""
+        antutu = df.quality_score({"kind": "phone", "benchmark_name": "antutu_v10",
+                                   "benchmark_score": 800_000, "ram_gb": [8]})["score"]
+        passmark = df.quality_score({"kind": "phone", "benchmark_name": "passmark_device",
+                                     "benchmark_score": 9587, "ram_gb": [8]})["score"]
+        self.assertLess(abs(antutu - passmark), 15, (antutu, passmark))
+
+    def test_top_of_table_is_great(self):
+        r = df.quality_score({"kind": "phone", "benchmark_name": "passmark_device",
+                              "benchmark_score": 23_515, "ram_gb": [12]})
+        self.assertGreaterEqual(r["score"], 75)

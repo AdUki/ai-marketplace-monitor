@@ -236,7 +236,14 @@ good working condition."""
 # Rough class-typical ceilings used to normalise a raw benchmark to 0..1.
 # Chosen as "a genuinely high-end current device", so ~1.0 means flagship and
 # ~0.3 means entry level. They only need to be consistent, not exact.
+# Calibrated from the downloaded tables themselves (n=5,247 phones and
+# n=2,844 CPUs): the ceiling is roughly the 99th percentile, so a current
+# flagship lands near 1.0 and a mid-range device sits mid-scale. Without an
+# entry here a score is measured against the wrong scale entirely -- a
+# PassMark phone score of 9,587 read as an AnTuTu total scores 0/100.
 BENCHMARK_CEILING = {
+    "passmark_device": 24_000,   # p99 of the Android device table
+    "passmark_gpu": 28_000,      # p99 of the GPU table
     "antutu_v10": 2_000_000,   # current flagship phones land around here
     "antutu_v9": 1_000_000,    # v9 scores run roughly half of v10
     "antutu": 1_500_000,       # version unstated - assume something between
