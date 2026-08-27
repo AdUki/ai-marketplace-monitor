@@ -365,18 +365,6 @@ def fetch_specs(model: str, api_key: str, kind: str = "auto", timeout: int = 45)
     raise last_err or RuntimeError("spec lookup failed")
 
 
-LAPTOP_HINTS = ("laptop", "notebook", "macbook", "thinkpad", "ideapad", "vivobook",
-                "zenbook", "latitude", "elitebook", "probook", "inspiron", "pavilion",
-                "chromebook", "ultrabook", "aspire", "nitro", "legion", "omen")
-
-
-def guess_kind(text: str) -> str:
-    t = _norm(text)
-    if any(h in t for h in LAPTOP_HINTS):
-        return "laptop"
-    return "phone"
-
-
 def has_real_facts(facts: Dict[str, Any]) -> bool:
     """True when an entry holds actual looked-up data, not just a failed try.
 
@@ -442,25 +430,113 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     return facts
 
 
-# Brands whose phones/laptops have a published benchmark worth looking up.
-# The monitor also matches furniture, baby monitors, consoles and clothing;
-# queueing those wastes a rate-limited web search on something that has no
-# SoC or CPU score at all.
-BENCHMARKABLE_BRANDS = (
-    "samsung", "galaxy", "iphone", "ipad", "apple", "macbook", "xiaomi", "redmi",
-    "poco", "huawei", "honor", "realme", "oneplus", "oppo", "vivo", "pixel",
-    "motorola", "moto", "nokia", "sony", "xperia", "nothing", "asus", "zenfone",
-    "lenovo", "thinkpad", "ideapad", "yoga", "legion", "hp", "elitebook",
-    "probook", "pavilion", "omen", "dell", "latitude", "inspiron", "xps",
-    "acer", "aspire", "predator", "nitro", "msi", "microsoft", "surface",
-    "alienware", "chromebook", "vivobook", "zenbook", "tuf", "rog",
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+# Only phones, tablets and laptops have a benchmark this tool can use. The
+# monitor also surfaces furniture, clothing, consoles, TVs and accessories,
+# and every one of those queued for a lookup wastes a rate-limited web search
+# on a device that has no SoC or CPU score at all.
+#
+# Order matters: accessories are checked FIRST, because they almost always
+# name the device they attach to ("Podstavec pre notebook", "Asus Notebook
+# SSD disk", "Sieťový adaptér Asus ROG"), and a brand match alone would
+# happily queue a laptop stand.
+
+# Things sold FOR a device, not the device. Slovak and English.
+ACCESSORY_MARKERS = (
+    "podstavec", "stojan", "stand", "adapter", "adaptér", "nabijacka", "nabíjačka",
+    "charger", "kabel", "kábel", "cable", "puzdro", "obal", "kryt", "case", "cover",
+    "sklo", "folia", "fólia", "screen protector", "dokovacia", "dokovaci",
+    "docking", "dock", "klavesnica", "klávesnica", "keyboard", "mys", "myš",
+    "mouse", "pencil", "stylus", "pero", "remienok", "strap", "sluchadla",
+    "slúchadlá", "headphones", "earbuds", "buds", "taska", "taška", "batoh",
+    "backpack", "sleeve", "ssd disk", "hdd", "ram modul", "pamet", "pamäť",
+    "chladic", "chladič", "cooler", "webcam", "hub", "redukcia", "napajaci",
+    "napájací", "power supply", "diely", "nahradne", "náhradné",
+)
+
+# Devices with no comparable CPU/SoC benchmark in this scheme.
+NON_COMPUTE_MARKERS = (
+    "playstation", "ps3", "ps4", "ps5", "xbox", "nintendo", "switch", "konzola",
+    "console", "televizor", "televízor", " tv ", "tv ", "smart tv", "monitor",
+    "projektor", "reproduktor", "speaker", "pracka", "práčka", "susicka",
+    "sušička", "chladnicka", "chladnička", "mraznicka", "mraznička", "bicykel",
+    "gitara", "hodinky", "watch", "band", "kamera", "fotoaparat", "dron",
+    # Displays are often named only by product line and refresh rate
+    # ("MSI Optix G27C6 - 27\u201d, 165 Hz"), never the word "monitor".
+    " hz", "optix", "odyssey g", "ultragear", "nitro xv", "viewsonic",
+    # A graphics tablet is not a compute tablet.
+    "wacom", "graficky tablet", "grafický tablet", "intuos", "huion",
+)
+
+LAPTOP_HINTS = (
+    "laptop", "notebook", "macbook", "thinkpad", "ideapad", "vivobook", "zenbook",
+    "latitude", "elitebook", "probook", "inspiron", "pavilion", "chromebook",
+    "ultrabook", "aspire", "nitro", "legion", "omen", "predator", "yoga",
+    "surface laptop", "zephyrus", "alienware", "loq", "tuf", "rog",
+)
+
+# Phones and tablets alike run a mobile SoC with an AnTuTu score.
+MOBILE_HINTS = (
+    "iphone", "ipad", "galaxy", "samsung a", "samsung s", "redmi", "poco",
+    "xiaomi", "huawei", "honor", "realme", "oneplus", "oppo", "vivo", "pixel",
+    "motorola", "moto g", "nokia", "xperia", "nothing phone", "telefon",
+    "telefón", "mobil", "smartfon", "smartfón", "tablet", "tab s",
+)
+
+COMPUTE_BRANDS = (
+    "samsung", "apple", "xiaomi", "huawei", "honor", "realme", "oneplus", "oppo",
+    "vivo", "google", "motorola", "nokia", "sony", "nothing", "asus", "lenovo",
+    "hp", "dell", "acer", "msi", "microsoft", "alienware", "gigabyte", "razer",
 )
 
 
+def _has(text: str, markers) -> bool:
+    return any(m in text for m in markers)
+
+
+def classify(title: str) -> str:
+    """Return 'phone', 'laptop' or 'other' for a listing title.
+
+    'other' means: do not spend a spec lookup on this.
+    """
+    t = " " + _norm(title) + " "
+
+    # Accessories are judged on the part BEFORE a "+", because a bundle lists
+    # the device first and the extras after it: "MacBook Air + Magic Mouse" is
+    # a laptop, while "Asus Notebook SSD disk" and "Podstavec pre notebook"
+    # are an SSD and a stand that merely name what they attach to.
+    # Split the RAW title: _norm strips punctuation, so splitting afterwards
+    # would never find the separator.
+    primary = " " + _norm(title.split("+")[0]) + " "
+    if _has(primary, ACCESSORY_MARKERS):
+        return "other"
+
+    # Laptops first: gaming models legitimately mention refresh rates ("144Hz")
+    # that would otherwise read as a monitor.
+    if _has(t, LAPTOP_HINTS):
+        return "laptop"
+    if _has(t, NON_COMPUTE_MARKERS):
+        return "other"
+    if _has(t, MOBILE_HINTS):
+        return "phone"
+    # Deliberately no "known brand + a digit" fallback: it classified an
+    # "MSI Optix G27C6" monitor as a phone. Skipping an unrecognised device
+    # costs one missing spec line; guessing wastes a rate-limited lookup and
+    # produces a nonsense score.
+    return "other"
+
+
+def guess_kind(text: str) -> str:
+    """Device kind for spec lookup; defaults to phone for unknown devices."""
+    kind = classify(text)
+    return "laptop" if kind == "laptop" else "phone"
+
+
 def looks_benchmarkable(title: str) -> bool:
-    """Whether a listing is a phone/laptop worth resolving specs for."""
-    t = _norm(title)
-    return any(b in t for b in BENCHMARKABLE_BRANDS)
+    """Whether a listing is a phone/tablet/laptop worth resolving specs for."""
+    return classify(title) != "other"
 
 
 def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
