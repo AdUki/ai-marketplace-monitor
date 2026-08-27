@@ -684,3 +684,14 @@ html, body {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* Remember-me row on the login form. */
+.login-form label.remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim, #9aa0aa);
+  margin: 2px 0 10px;
+}
+.login-form label.remember input { width: auto; margin: 0; }

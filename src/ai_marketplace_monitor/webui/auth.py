@@ -16,6 +16,10 @@ SESSION_COOKIE = "aimm_session"
 CSRF_COOKIE = "aimm_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 SESSION_TTL = 8 * 60 * 60  # 8 hours
+# "Remember me" lifetime. Retyping a Facebook password on a phone every 8
+# hours is the kind of friction that gets a password saved somewhere worse,
+# so the opt-in is a longer session rather than a stored credential.
+SESSION_TTL_REMEMBER = 30 * 24 * 60 * 60  # 30 days
 
 _LOCKOUT_THRESHOLD = 5
 _LOCKOUT_WINDOW = 60  # seconds
@@ -107,7 +111,7 @@ class SessionManager:
 
     def validate(self, token: str) -> str | None:
         try:
-            username_bytes = self._signer.unsign(token, max_age=SESSION_TTL)
+            username_bytes = self._signer.unsign(token, max_age=SESSION_TTL_REMEMBER)
         except BadSignature:
             return None
         return username_bytes.decode("utf-8")

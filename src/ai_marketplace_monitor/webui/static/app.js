@@ -101,6 +101,7 @@
     const body = new FormData();
     body.set("username", form.username.value);
     body.set("password", form.password.value);
+    body.set("remember", form.remember && form.remember.checked ? "1" : "0");
     try {
       const res = await fetch("/api/login", { method: "POST", body, credentials: "same-origin" });
       if (!res.ok) {

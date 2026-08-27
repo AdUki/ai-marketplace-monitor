@@ -35,7 +35,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 
 from ..utils import cache
-from .auth import (
+from .auth import (  # noqa: F401
+    SESSION_TTL_REMEMBER,
     CSRF_COOKIE,
     CSRF_HEADER,
     SESSION_COOKIE,
@@ -124,18 +125,21 @@ def _resolve_auth(config: WebUIConfig) -> tuple[AuthState, StartupInfo]:
     return state, info
 
 
-def _set_session_cookies(response: Response, token: str, csrf: str) -> None:
+def _set_session_cookies(
+    response: Response, token: str, csrf: str, remember: bool = False
+) -> None:
+    ttl = SESSION_TTL_REMEMBER if remember else SESSION_TTL
     response.set_cookie(
         SESSION_COOKIE,
         token,
-        max_age=SESSION_TTL,
+        max_age=ttl,
         httponly=True,
         samesite="strict",
     )
     response.set_cookie(
         CSRF_COOKIE,
         csrf,
-        max_age=SESSION_TTL,
+        max_age=ttl,
         httponly=False,  # JS reads this to echo via header
         samesite="strict",
     )
@@ -231,11 +235,13 @@ def create_app(
         response: Response,
         username: str = Form(""),
         password: str = Form(""),
+        remember: str = Form(""),
     ) -> Dict[str, Any]:
+        keep = remember.lower() in ("1", "true", "on", "yes")
         # Loopback — always open, no password needed.
         if is_open():
             token, csrf = sessions.issue("anonymous")
-            _set_session_cookies(response, token, csrf)
+            _set_session_cookies(response, token, csrf, remember=keep)
             return {"username": "anonymous", "csrf": csrf}
 
         # Exposed — credentials required.
@@ -252,7 +258,7 @@ def create_app(
 
         rate_limiter.reset(client_ip)
         token, csrf = sessions.issue(username)
-        _set_session_cookies(response, token, csrf)
+        _set_session_cookies(response, token, csrf, remember=keep)
         return {"username": username, "csrf": csrf}
 
     @app.post("/api/logout")
@@ -547,6 +553,7 @@ ITEMS_PAGE = """<!doctype html>
 :root{--bg:#0f1115;--card:#181b22;--line:#272b35;--fg:#e8eaed;--dim:#9aa0aa;
       --good:#37b24d;--ok:#f59f00;--bad:#e03131;--link:#4dabf7}
 *{box-sizing:border-box}
+html,body{max-width:100%;overflow-x:hidden}
 body{margin:0;background:var(--bg);color:var(--fg);
      font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
      padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
@@ -559,7 +566,20 @@ h1{font-size:17px;margin:0}
 .controls{display:flex;gap:8px;flex-wrap:wrap}
 input,select{background:var(--card);color:var(--fg);border:1px solid var(--line);
              border-radius:8px;padding:9px 10px;font-size:16px;flex:1 1 130px;min-width:0}
-main{padding:12px;display:grid;gap:12px;max-width:900px;margin:0 auto}
+main{padding:12px;display:grid;gap:12px;max-width:900px;margin:0 auto;width:100%}
+/* Anything that can be long -- URLs, model names, seller text -- must wrap
+   rather than widen the page; a single long token was enough to make the
+   whole layout scroll sideways on a phone. */
+.card,.card *{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+img{max-width:100%;height:auto}
+#login{display:none;max-width:420px;margin:40px auto;padding:0 12px}
+#login.show{display:block}
+#login input{width:100%;margin-bottom:10px}
+#login label{display:flex;align-items:center;gap:8px;color:var(--dim);
+             font-size:14px;margin-bottom:12px}
+#login button{width:100%;background:var(--link);color:#08101c;border:0;
+              border-radius:9px;padding:12px;font-size:16px;font-weight:700}
+#login .err{color:var(--bad);font-size:13px;min-height:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;overflow-wrap:anywhere}
 .top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
 .title{font-weight:600;margin:0;font-size:15px}
@@ -596,6 +616,14 @@ a.go{display:inline-block;margin-top:10px;background:var(--link);color:#08101c;
       <option value="quality">quality</option><option value="cheap">cheapest</option></select>
   </div>
 </header>
+<form id="login" autocomplete="on">
+  <p class="meta">Sign in with the marketplace credentials from your config.</p>
+  <input id="u" name="username" placeholder="Username" autocomplete="username">
+  <input id="p" name="password" type="password" placeholder="Password" autocomplete="current-password">
+  <label><input type="checkbox" id="rm" checked> Stay signed in for 30 days</label>
+  <button type="submit">Sign in</button>
+  <p class="err" id="err"></p>
+</form>
 <main id="list"><div class="empty">Loading...</div></main>
 <script>
 const E=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -646,11 +674,32 @@ function render(){
   document.getElementById("list").innerHTML=v.length?v.map(card).join(""):
     '<div class="empty">Nothing matches. Matches appear here once the monitor rates a listing highly enough to notify.</div>';
 }
-fetch("/api/items",{credentials:"same-origin"}).then(r=>{
-  if(r.status===401){location.href="/console";return null} return r.json()})
- .then(d=>{if(!d)return;ITEMS=d.items||[];render()})
- .catch(e=>{document.getElementById("list").innerHTML=
-   '<div class="empty">Could not load items: '+E(e.message)+'</div>'});
+function showLogin(){document.getElementById("login").classList.add("show");
+  document.getElementById("list").innerHTML="";document.getElementById("n").textContent=""}
+function load(){
+  return fetch("/api/items",{credentials:"same-origin"}).then(r=>{
+    if(r.status===401){showLogin();return null} return r.json()})
+   .then(d=>{if(!d)return;
+     document.getElementById("login").classList.remove("show");
+     ITEMS=d.items||[];render()})
+   .catch(e=>{document.getElementById("list").innerHTML=
+     '<div class="empty">Could not load items: '+E(e.message)+'</div>'});
+}
+// Log in without leaving the page: bouncing to the desktop console just to
+// authenticate was why "/" appeared to open the console.
+document.getElementById("login").addEventListener("submit",ev=>{
+  ev.preventDefault();
+  const f=new FormData();
+  f.append("username",document.getElementById("u").value);
+  f.append("password",document.getElementById("p").value);
+  f.append("remember",document.getElementById("rm").checked?"1":"0");
+  document.getElementById("err").textContent="";
+  fetch("/api/login",{method:"POST",body:f,credentials:"same-origin"})
+   .then(r=>r.ok?load():r.json().then(j=>{
+     document.getElementById("err").textContent=(j&&j.detail)||"Sign-in failed";}))
+   .catch(e=>{document.getElementById("err").textContent=e.message});
+});
+load();
 ["q","min","sort"].forEach(id=>document.getElementById(id)
   .addEventListener("input",render));
 </script></body></html>"""
