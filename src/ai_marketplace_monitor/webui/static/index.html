@@ -42,7 +42,12 @@
       </div>
     </header>
 
-    <main class="main">
+    <nav class="pane-tabs" id="pane-tabs" role="tablist" aria-label="Console sections">
+      <button class="pane-tab active" data-pane="editor" role="tab" aria-selected="true">Config</button>
+      <button class="pane-tab" data-pane="logs" role="tab" aria-selected="false">Logs</button>
+    </nav>
+
+    <main class="main" id="main-panes">
       <section class="editor-pane">
         <div class="editor-toolbar">
           <div class="add-dropdown" id="add-dropdown">

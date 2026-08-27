@@ -100,6 +100,11 @@ html, body {
 
 /* -------- App layout -------- */
 .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+/* dvh tracks the visible area as mobile browser chrome hides/shows; without
+   it the bottom of the console sits under the URL bar. Kept after the vh rule
+   so unsupporting browsers still get something sensible. */
+@supports (height: 100dvh) { .app { height: 100dvh; } }
+.pane-tabs { display: none; }
 .header {
   display: flex;
   justify-content: space-between;
@@ -695,3 +700,97 @@ html, body {
   margin: 2px 0 10px;
 }
 .login-form label.remember input { width: auto; margin: 0; }
+
+
+/* ==================================================================
+   Mobile console
+   ------------------------------------------------------------------
+   .main asked for two columns of min 360px each, i.e. a 721px floor, so
+   every phone rendered the console wider than its own screen: the page
+   scrolled sideways and content slid under the sticky header.
+
+   Below 820px the panes stack and only one is shown at a time, chosen
+   with a tab bar. Stacking alone would mean scrolling past the whole
+   config editor to reach the logs, which on a phone is worse than
+   useless.
+   ================================================================== */
+@media (max-width: 820px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+  .header-left { width: 100%; gap: 8px; min-width: 0; }
+  .brand { font-size: 14px; }
+  .config-name {
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+  }
+  /* Touch targets: 12px text with 6px padding is far below a usable size. */
+  .header button,
+  .header a.ghost {
+    font-size: 13px;
+    padding: 9px 12px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .header button.small { padding: 9px 12px; font-size: 13px; }
+
+  .pane-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+  .pane-tab {
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 12px 8px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  .pane-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* One column, one visible pane. */
+  .main { grid-template-columns: 1fr; min-width: 0; }
+  .main > section { min-width: 0; max-width: 100%; }
+  .main.show-logs .editor-pane,
+  .main:not(.show-logs) .logs-pane { display: none; }
+
+  /* Toolbars wrap instead of overflowing. */
+  .editor-toolbar, .logs-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .toolbar-spacer { display: none; }
+  .toolbar-btn, .chip { min-height: 38px; font-size: 13px; }
+
+  /* 16px inputs: anything smaller makes iOS zoom in on focus, which is the
+     other half of why this felt broken to use. */
+  input, select, textarea, .cm-content { font-size: 16px !important; }
+
+  /* The line-number gutter costs scarce width and cannot be tapped usefully. */
+  .gutter { display: none; }
+
+  .editor-with-gutter, #editor-host { min-height: 45vh; }
+  .logs-pane { min-height: 45vh; }
+  .log-line, .logs-body { overflow-wrap: anywhere; word-break: break-word; }
+}

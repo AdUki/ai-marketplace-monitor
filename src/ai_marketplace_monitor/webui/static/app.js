@@ -1713,4 +1713,23 @@
       showLogin();
     }
   })();
+
+  // Mobile pane tabs (Config / Logs). The tab bar only renders below 820px;
+  // on desktop both panes are visible and these listeners never fire.
+  // Registered outside the auth flow so switching works even before login.
+  (function initPaneTabs() {
+    const tabs = document.querySelectorAll(".pane-tab");
+    const main = document.getElementById("main-panes");
+    if (!tabs.length || !main) return;
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        tabs.forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle("active", on);
+          t.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        main.classList.toggle("show-logs", tab.dataset.pane === "logs");
+      });
+    });
+  })();
 })();
