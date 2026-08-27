@@ -40,6 +40,10 @@ html, body {
 }
 
 .hidden { display: none !important; }
+/* The hidden ATTRIBUTE must win too. `.header a.ghost` sets display:
+   inline-block, which silently overrode `hidden` and left the VNC-only
+   "Browser" link visible on installs with no noVNC, where it 404s. */
+[hidden] { display: none !important; }
 
 /* -------- Login -------- */
 .login-screen {

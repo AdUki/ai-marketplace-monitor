@@ -463,9 +463,16 @@ def create_app(
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-        @app.get("/")
-        async def index() -> FileResponse:
+        # The config/log SPA lives at /console. "/" serves the item browser
+        # instead: the common case is checking deals from a phone, not editing
+        # TOML, and the SPA is desktop-only.
+        @app.get("/console")
+        async def console_page() -> FileResponse:
             return FileResponse(STATIC_DIR / "index.html")
+
+        @app.get("/")
+        async def index() -> HTMLResponse:
+            return HTMLResponse(ITEMS_PAGE)
 
     # Sync def (not async): FastAPI runs it in a threadpool and Starlette
     # iterates the sync generator there too, so the blocking cache scan never
@@ -517,7 +524,11 @@ def create_app(
         return JSONResponse({"items": out, "count": len(out)})
 
     @app.get("/items")
-    def items_page(_: str = Depends(require_session)) -> HTMLResponse:
+    def items_page() -> HTMLResponse:
+        # No session required for the shell itself -- it holds no data and
+        # redirects to the login form when /api/items answers 401. Same
+        # reasoning as "/" (and as the SPA, which was always served
+        # unauthenticated and gates on its API calls).
         return HTMLResponse(ITEMS_PAGE)
 
     return app
@@ -541,7 +552,10 @@ body{margin:0;background:var(--bg);color:var(--fg);
      padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 header{position:sticky;top:0;z-index:5;background:var(--bg);
        border-bottom:1px solid var(--line);padding:10px 12px}
-h1{font-size:17px;margin:0 0 8px}
+h1{font-size:17px;margin:0}
+.hrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.console{flex:none;color:var(--fg);background:var(--card);border:1px solid var(--line);
+         border-radius:8px;padding:7px 11px;text-decoration:none;font-size:13px}
 .controls{display:flex;gap:8px;flex-wrap:wrap}
 input,select{background:var(--card);color:var(--fg);border:1px solid var(--line);
              border-radius:8px;padding:9px 10px;font-size:16px;flex:1 1 130px;min-width:0}
@@ -570,7 +584,10 @@ a.go{display:inline-block;margin-top:10px;background:var(--link);color:#08101c;
 .empty{color:var(--dim);text-align:center;padding:36px 12px}
 </style></head><body>
 <header>
-  <h1>Deals <span id="n" class="meta"></span></h1>
+  <div class="hrow">
+    <h1>Deals <span id="n" class="meta"></span></h1>
+    <a class="console" href="/console" title="Config editor and live logs">&#9881; Console</a>
+  </div>
   <div class="controls">
     <input id="q" placeholder="Search title, seller, AI note...">
     <select id="min"><option value="0">any rating</option><option value="3">3+</option>
@@ -630,7 +647,7 @@ function render(){
     '<div class="empty">Nothing matches. Matches appear here once the monitor rates a listing highly enough to notify.</div>';
 }
 fetch("/api/items",{credentials:"same-origin"}).then(r=>{
-  if(r.status===401){location.href="/";return null} return r.json()})
+  if(r.status===401){location.href="/console";return null} return r.json()})
  .then(d=>{if(!d)return;ITEMS=d.items||[];render()})
  .catch(e=>{document.getElementById("list").innerHTML=
    '<div class="empty">Could not load items: '+E(e.message)+'</div>'});
