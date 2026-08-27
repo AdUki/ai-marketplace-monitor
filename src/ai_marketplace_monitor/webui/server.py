@@ -582,7 +582,12 @@ def create_app(
                 except Exception:  # noqa: BLE001 - browser must still render
                     item["specs"] = {}
             out.append(item)
-        out.reverse()  # newest first
+        # Sort on the timestamp rather than reversing cache order. diskcache
+        # does not iterate chronologically, so the previous reverse() produced
+        # an arbitrary order that happened to come out oldest-first.
+        # found_at is "YYYY-MM-DD HH:MM:SS", which sorts correctly as text;
+        # rows missing it sort last rather than breaking the comparison.
+        out.sort(key=lambda i: (i.get("found_at") or ""), reverse=True)
         return JSONResponse(
             {
                 "items": out,
@@ -770,6 +775,7 @@ function render(){
   let v=ITEMS.filter(it=>showHidden?true:!it.dismissed)
     .filter(it=>(parseInt(it.rating)||0)>=min).filter(it=>!q||
     [it.title,it.seller,it.ai_comment,it.item,it.description].join(" ").toLowerCase().includes(q));
+  if(sort==="new") v.sort((a,b)=>String(b.found_at||"").localeCompare(String(a.found_at||"")));
   if(sort==="rating") v.sort((a,b)=>(parseInt(b.rating)||0)-(parseInt(a.rating)||0));
   if(sort==="quality") v.sort((a,b)=>((b.specs||{}).score??-1)-((a.specs||{}).score??-1));
   if(sort==="cheap") v.sort((a,b)=>(num(a.price)??1e9)-(num(b.price)??1e9));
