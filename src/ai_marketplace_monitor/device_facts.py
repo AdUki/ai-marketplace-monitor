@@ -569,8 +569,13 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     return device_facts(title, offline=True, kind=kind)
 
 
-def warm_cache(limit: int = 20, verbose: bool = True) -> int:
-    """Resolve queued models. Run from cron/systemd, never inline."""
+def warm_cache(limit: int = 5, verbose: bool = True) -> int:
+    """Resolve queued models. Run from cron/systemd, never inline.
+
+    The batch is small on purpose: a single agentic web lookup takes tens of
+    seconds, so a large batch would still be running when the next timer
+    fires, and two overlapping runs would compete for the same rate limit.
+    """
     pending = _load(PENDING)
     if not pending:
         return 0
