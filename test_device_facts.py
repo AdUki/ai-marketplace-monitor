@@ -26,15 +26,17 @@ class TempCache:
     def __enter__(self):
         self.tmp = tempfile.TemporaryDirectory()
         d = Path(self.tmp.name)
-        self._orig = (df.CACHE_DIR, df.FACTS_CACHE, df.LINEAGE_CACHE, df.OVERRIDES)
+        self._orig = (df.CACHE_DIR, df.FACTS_CACHE, df.LINEAGE_CACHE, df.OVERRIDES, df.PENDING)
         df.CACHE_DIR = d
         df.FACTS_CACHE = d / "device_facts.json"
         df.LINEAGE_CACHE = d / "lineageos_devices.json"
         df.OVERRIDES = d / "device_facts_overrides.json"
+        df.PENDING = d / "device_facts_pending.json"
         return d
 
     def __exit__(self, *a):
-        df.CACHE_DIR, df.FACTS_CACHE, df.LINEAGE_CACHE, df.OVERRIDES = self._orig
+        (df.CACHE_DIR, df.FACTS_CACHE, df.LINEAGE_CACHE, df.OVERRIDES,
+         df.PENDING) = self._orig
         self.tmp.cleanup()
 
 
@@ -412,3 +414,53 @@ class TestModelKey(unittest.TestCase):
 
     def test_never_returns_empty(self):
         self.assertTrue(df.model_key("predam novy telefon"))
+
+
+class TestNoPoisonedCache(unittest.TestCase):
+    """A failed lookup must not masquerade as a resolved model."""
+
+    def test_offline_miss_is_not_cached(self):
+        with TempCache():
+            df.device_facts("Totally Unknown Phone", offline=True)
+            self.assertEqual(_json_or_empty(df.FACTS_CACHE), {})
+
+    def test_failed_lookup_is_not_cached(self):
+        with TempCache(), mock.patch.dict(os.environ, {"GROQ_API_KEY": "k"}):
+            with mock.patch.object(df, "fetch_specs", side_effect=df.RateLimited("busy")):
+                df.device_facts("Some Phone")
+            self.assertEqual(_json_or_empty(df.FACTS_CACHE), {})
+
+    def test_successful_lookup_is_cached(self):
+        with TempCache(), mock.patch.dict(os.environ, {"GROQ_API_KEY": "k"}):
+            with mock.patch.object(df, "fetch_specs",
+                                   return_value={"chip": "SD888", "ram_gb": [8]}):
+                df.device_facts("Some Phone")
+            self.assertTrue(_json_or_empty(df.FACTS_CACHE))
+
+    def test_empty_entry_does_not_block_a_later_lookup(self):
+        with TempCache():
+            df._save(df.FACTS_CACHE,
+                     {"samsung galaxy s21": {"query": "x", "specs_error": "offline"}})
+            df.facts_for_listing("Samsung Galaxy S21")
+            self.assertIn("samsung galaxy s21", _json_or_empty(df.PENDING),
+                          "an unresolved model must stay queued")
+
+    def test_non_devices_are_not_queued(self):
+        """Furniture, clothing and consoles have no benchmark to look up."""
+        with TempCache():
+            for junk in ("Detska stolicka", "Dievcenske saty", "Susicka 7Kg",
+                         "Monitor dychu babysense"):
+                df.facts_for_listing(junk)
+            self.assertEqual(_json_or_empty(df.PENDING), {})
+
+    def test_devices_are_queued(self):
+        with TempCache():
+            df.facts_for_listing("Lenovo ThinkPad X13")
+            self.assertTrue(_json_or_empty(df.PENDING))
+
+
+def _json_or_empty(path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}

@@ -377,6 +377,21 @@ def guess_kind(text: str) -> str:
     return "phone"
 
 
+def has_real_facts(facts: Dict[str, Any]) -> bool:
+    """True when an entry holds actual looked-up data, not just a failed try.
+
+    An offline call can only report LineageOS support, so caching its result
+    as if the model were resolved makes every later call a cache hit and the
+    real lookup never happens.
+    """
+    return bool(
+        facts.get("benchmark_score")
+        or facts.get("chip")
+        or facts.get("ram_gb")
+        or facts.get("overridden")
+    )
+
+
 def device_facts(model: str, refresh: bool = False, offline: bool = False, kind: str = "auto") -> Dict[str, Any]:
     """Facts for one model. Cached, so each model costs one lookup ever.
 
@@ -419,9 +434,33 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
 
     facts.update(quality_score(facts))
     facts["cached_at"] = int(time.time())
-    cache[key] = facts
-    _save(FACTS_CACHE, cache)
+    # Only persist a resolved entry. Storing an offline/failed attempt would
+    # mask the model as "known" and stop it ever being looked up properly.
+    if has_real_facts(facts):
+        cache[key] = facts
+        _save(FACTS_CACHE, cache)
     return facts
+
+
+# Brands whose phones/laptops have a published benchmark worth looking up.
+# The monitor also matches furniture, baby monitors, consoles and clothing;
+# queueing those wastes a rate-limited web search on something that has no
+# SoC or CPU score at all.
+BENCHMARKABLE_BRANDS = (
+    "samsung", "galaxy", "iphone", "ipad", "apple", "macbook", "xiaomi", "redmi",
+    "poco", "huawei", "honor", "realme", "oneplus", "oppo", "vivo", "pixel",
+    "motorola", "moto", "nokia", "sony", "xperia", "nothing", "asus", "zenfone",
+    "lenovo", "thinkpad", "ideapad", "yoga", "legion", "hp", "elitebook",
+    "probook", "pavilion", "omen", "dell", "latitude", "inspiron", "xps",
+    "acer", "aspire", "predator", "nitro", "msi", "microsoft", "surface",
+    "alienware", "chromebook", "vivobook", "zenbook", "tuf", "rog",
+)
+
+
+def looks_benchmarkable(title: str) -> bool:
+    """Whether a listing is a phone/laptop worth resolving specs for."""
+    t = _norm(title)
+    return any(b in t for b in BENCHMARKABLE_BRANDS)
 
 
 def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
@@ -434,16 +473,19 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     """
     cache = _load(FACTS_CACHE)
     key = model_key(title)
-    if key in cache:
-        return cache[key]
-    # Fall back to a containment match, so a longer cached key still serves a
-    # shorter title (and vice versa) rather than triggering a fresh lookup.
-    for cached_key, facts in cache.items():
-        if cached_key and (cached_key in key or key in cached_key):
-            return facts
+    hit = cache.get(key)
+    if hit is None:
+        # Containment match, so a longer cached key still serves a shorter
+        # title (and vice versa) rather than triggering a fresh lookup.
+        for cached_key, facts in cache.items():
+            if cached_key and (cached_key in key or key in cached_key):
+                hit = facts
+                break
+    if hit is not None and has_real_facts(hit):
+        return hit
     try:
         pending = _load(PENDING)
-        if key and key not in pending:
+        if key and key not in pending and looks_benchmarkable(title):
             pending[key] = {"title": title, "kind": kind, "seen_at": int(time.time())}
             _save(PENDING, pending)
     except OSError:
