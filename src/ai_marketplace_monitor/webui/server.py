@@ -16,6 +16,7 @@ import socket
 import threading
 import time
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -34,7 +35,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from ..utils import cache
+from ..utils import amm_home, cache
 from .auth import (  # noqa: F401
     SESSION_TTL_REMEMBER,
     CSRF_COOKIE,
@@ -493,6 +494,59 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    def _dismissed_path() -> Path:
+        return amm_home / "dismissed_items.json"
+
+    def _load_dismissed() -> set:
+        try:
+            return set(json.loads(_dismissed_path().read_text()))
+        except (OSError, ValueError):
+            return set()
+
+    def _save_dismissed(urls: set) -> None:
+        tmp = _dismissed_path().with_suffix(".tmp")
+        tmp.write_text(json.dumps(sorted(urls)))
+        tmp.replace(_dismissed_path())
+
+    @app.post("/api/items/dismiss")
+    def dismiss_item(
+        payload: Dict[str, Any],
+        _: str = Depends(require_session),
+        __: None = Depends(require_csrf),
+    ) -> JSONResponse:
+        """Hide a listing from the browser.
+
+        Only the web view is affected: the monitor's own notified-cache is
+        left alone, so hiding something can never cause it to be re-notified
+        as if it were new. Keyed on the listing URL, which is the one field
+        present on every row.
+        """
+        url = (payload or {}).get("url", "").split("?")[0]
+        if not url:
+            raise HTTPException(status_code=400, detail="url required")
+        d = _load_dismissed()
+        if (payload or {}).get("undo"):
+            d.discard(url)
+        else:
+            d.add(url)
+        _save_dismissed(d)
+        return JSONResponse({"dismissed": len(d)})
+
+    @app.post("/api/items/dismiss_all")
+    def dismiss_all(
+        payload: Dict[str, Any],
+        _: str = Depends(require_session),
+        __: None = Depends(require_csrf),
+    ) -> JSONResponse:
+        urls = [u.split("?")[0] for u in (payload or {}).get("urls", []) if u]
+        d = _load_dismissed()
+        if (payload or {}).get("undo"):
+            d.difference_update(urls)
+        else:
+            d.update(urls)
+        _save_dismissed(d)
+        return JSONResponse({"dismissed": len(d)})
+
     @app.get("/api/items")
     def api_items(_: str = Depends(require_session)) -> JSONResponse:
         """Everything known about each matched listing, for the item browser.
@@ -502,6 +556,7 @@ def create_app(
         looked up per model. Read-only and cache-only: no scraping, no network.
         """
         rows = build_found_rows(cache)
+        dismissed = _load_dismissed()
         try:
             from ..device_facts import facts_for_listing
         except Exception:  # noqa: BLE001
@@ -510,6 +565,7 @@ def create_app(
         out = []
         for r in rows:
             item = dict(r)
+            item["dismissed"] = (r.get("url", "").split("?")[0]) in dismissed
             if facts_for_listing is not None:
                 try:
                     f = facts_for_listing(r.get("title", "")) or {}
@@ -527,7 +583,13 @@ def create_app(
                     item["specs"] = {}
             out.append(item)
         out.reverse()  # newest first
-        return JSONResponse({"items": out, "count": len(out)})
+        return JSONResponse(
+            {
+                "items": out,
+                "count": len(out),
+                "dismissed_count": sum(1 for i in out if i.get("dismissed")),
+            }
+        )
 
     @app.get("/items")
     def items_page() -> HTMLResponse:
@@ -597,8 +659,14 @@ img{max-width:100%;height:auto}
 .desc{margin-top:8px;font-size:13px;color:var(--dim);white-space:pre-wrap;
       max-height:4.4em;overflow:hidden}
 .desc.open{max-height:none}
-a.go{display:inline-block;margin-top:10px;background:var(--link);color:#08101c;
-     text-decoration:none;font-weight:700;padding:9px 13px;border-radius:9px}
+.actions{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+a.go{display:inline-block;background:var(--link);color:#08101c;
+     text-decoration:none;font-weight:700;padding:11px 14px;border-radius:9px}
+.hide-btn{background:var(--card);color:var(--dim);border:1px solid var(--line);
+          border-radius:9px;padding:11px 14px;font-size:14px;min-height:44px;cursor:pointer}
+.hide-btn:hover{color:var(--fg);border-color:var(--bad)}
+.card.gone{opacity:.45}
+.undo{background:none;border:0;color:var(--link);font-size:13px;cursor:pointer;padding:11px 0}
 .more{margin-top:6px;color:var(--link);font-size:12px;cursor:pointer;
       background:none;border:0;padding:0}
 .empty{color:var(--dim);text-align:center;padding:36px 12px}
@@ -614,6 +682,8 @@ a.go{display:inline-block;margin-top:10px;background:var(--link);color:#08101c;
       <option value="4">4+</option><option value="5">5 only</option></select>
     <select id="sort"><option value="new">newest</option><option value="rating">rating</option>
       <option value="quality">quality</option><option value="cheap">cheapest</option></select>
+    <label class="meta" style="display:flex;align-items:center;gap:6px;flex:0 0 auto">
+      <input type="checkbox" id="showhidden" style="flex:none"> show hidden</label>
   </div>
 </header>
 <form id="login" autocomplete="on">
@@ -658,19 +728,55 @@ function card(it,i){
     ${it.ai_comment?`<div class="ai">${E(it.ai_comment)}</div>`:""}
     ${it.description?`<div class="desc" id="d${i}">${E(it.description)}</div>
       <button class="more" onclick="document.getElementById('d${i}').classList.toggle('open')">show more / less</button>`:""}
-    ${it.url?`<a class="go" href="${E(it.url)}" target="_blank" rel="noopener">Open on Facebook</a>`:""}
+    <div class="actions">
+      ${it.url?`<a class="go" href="${E(it.url)}" target="_blank" rel="noopener">Open on Facebook</a>`:""}
+      ${it.url?`<button class="hide-btn" onclick="hideItem(this,'${E(it.url)}',${it.dismissed?"true":"false"})">${it.dismissed?"&#8630; Restore":"&#10005; Hide"}</button>`:""}
+    </div>
   </div>`;
 }
+function csrf(){return (document.cookie.match(/(?:^|; )aimm_csrf=([^;]*)/)||[])[1]||""}
+// Hiding only affects this view: the monitor's own record of what it has
+// already notified is left untouched, so a hidden listing can never come
+// back as if it were newly found.
+function hideItem(btn,url,wasHidden){
+  const card=btn.closest(".card");
+  fetch("/api/items/dismiss",{method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json","X-CSRF-Token":decodeURIComponent(csrf())},
+    body:JSON.stringify({url:url,undo:wasHidden})})
+   .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);
+     const it=ITEMS.find(x=>(x.url||"").split("?")[0]===url.split("?")[0]);
+     if(it) it.dismissed=!wasHidden;
+     if(!wasHidden && !document.getElementById("showhidden").checked){
+       card.classList.add("gone");
+       setTimeout(render,150);
+     } else { render(); }})
+   .catch(e=>{btn.textContent="failed: "+e.message});
+}
+function hideAllShown(){
+  const urls=CURRENT.filter(i=>i.url&&!i.dismissed).map(i=>i.url);
+  if(!urls.length) return;
+  if(!confirm(`Hide ${urls.length} listing(s) currently shown?`)) return;
+  fetch("/api/items/dismiss_all",{method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json","X-CSRF-Token":decodeURIComponent(csrf())},
+    body:JSON.stringify({urls:urls})})
+   .then(()=>{urls.forEach(u=>{const it=ITEMS.find(x=>x.url===u); if(it) it.dismissed=true});render()});
+}
+let CURRENT=[];
 function render(){
   const q=document.getElementById("q").value.toLowerCase();
   const min=parseInt(document.getElementById("min").value)||0;
   const sort=document.getElementById("sort").value;
-  let v=ITEMS.filter(it=>(parseInt(it.rating)||0)>=min).filter(it=>!q||
+  const showHidden=document.getElementById("showhidden").checked;
+  let v=ITEMS.filter(it=>showHidden?true:!it.dismissed)
+    .filter(it=>(parseInt(it.rating)||0)>=min).filter(it=>!q||
     [it.title,it.seller,it.ai_comment,it.item,it.description].join(" ").toLowerCase().includes(q));
   if(sort==="rating") v.sort((a,b)=>(parseInt(b.rating)||0)-(parseInt(a.rating)||0));
   if(sort==="quality") v.sort((a,b)=>((b.specs||{}).score??-1)-((a.specs||{}).score??-1));
   if(sort==="cheap") v.sort((a,b)=>(num(a.price)??1e9)-(num(b.price)??1e9));
-  document.getElementById("n").textContent=`(${v.length}/${ITEMS.length})`;
+  CURRENT=v;
+  const hidden=ITEMS.filter(i=>i.dismissed).length;
+  document.getElementById("n").textContent=
+    `(${v.length}/${ITEMS.length}${hidden?`, ${hidden} hidden`:""})`;
   document.getElementById("list").innerHTML=v.length?v.map(card).join(""):
     '<div class="empty">Nothing matches. Matches appear here once the monitor rates a listing highly enough to notify.</div>';
 }
@@ -700,7 +806,7 @@ document.getElementById("login").addEventListener("submit",ev=>{
    .catch(e=>{document.getElementById("err").textContent=e.message});
 });
 load();
-["q","min","sort"].forEach(id=>document.getElementById(id)
+["q","min","sort","showhidden"].forEach(id=>document.getElementById(id)
   .addEventListener("input",render));
 </script></body></html>"""
 
