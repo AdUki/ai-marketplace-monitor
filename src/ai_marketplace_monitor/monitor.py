@@ -208,11 +208,13 @@ class MarketplaceMonitor:
             # condition, damage and scam signals than at valuation.
             res = None
             try:
-                from .device_facts import deterministic_verdict
+                from .device_facts import deterministic_verdict, note_seller
 
+                note_seller(getattr(listing, "seller", "") or "", listing.price)
                 verdict = deterministic_verdict(
                     listing.title, listing.price,
                     text=getattr(listing, "description", "") or "",
+                    seller=getattr(listing, "seller", "") or "",
                 )
                 if verdict:
                     res = AIResponse(

@@ -855,6 +855,49 @@ DAMAGE_MARKERS = (
 )
 
 
+# A genuine bargain is 50-70% off. It is not 95% off. Below this fraction of
+# working value the listing is bait, not a find: eight "RTX 4080 gaming
+# laptops" at EUR 109.99 were pushed straight past the model's scam checks
+# because the arithmetic loved them. Too-good-to-be-true is exactly the case
+# that needs a reader, so it goes to the model rather than being dropped --
+# it can still rate it a deal if the thing is real.
+TOO_GOOD_FRACTION = 0.15
+
+SELLER_STATS = CACHE_DIR / "seller_stats.json"
+
+# One seller listing this many items at an identical price is running a shop,
+# not clearing a drawer. The scam that prompted this had every item -- laptops,
+# a fridge, a television -- at exactly EUR 109.99.
+BULK_SELLER_LISTINGS = 3
+
+
+def note_seller(seller: str, price_text: Any) -> None:
+    """Record that a seller listed something at a price."""
+    price = parse_price(price_text)
+    if not seller or price is None:
+        return
+    try:
+        stats = _load(SELLER_STATS)
+        by_price = stats.setdefault(seller.strip().lower(), {})
+        bucket = f"{price:.2f}"
+        if bucket not in by_price:
+            by_price[bucket] = 0
+        by_price[bucket] += 1
+        _save(SELLER_STATS, stats)
+    except OSError:
+        pass
+
+
+def seller_looks_bulk(seller: str, price_text: Any) -> bool:
+    """True if this seller has posted several items at this exact price."""
+    price = parse_price(price_text)
+    if not seller or price is None:
+        return False
+    stats = _load(SELLER_STATS)
+    count = stats.get(seller.strip().lower(), {}).get(f"{price:.2f}", 0)
+    return count >= BULK_SELLER_LISTINGS
+
+
 # What a broken device is worth: parts money, not a discount off retail.
 DAMAGED_PRICE_FRACTION = 0.20
 
@@ -865,7 +908,8 @@ def looks_damaged(text: str) -> bool:
 
 
 def deterministic_verdict(
-    title: str, price_text: Any, kind: str = "auto", text: str = ""
+    title: str, price_text: Any, kind: str = "auto", text: str = "",
+    seller: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Settle a listing from data alone, or hand it to the model.
 
@@ -929,6 +973,11 @@ def deterministic_verdict(
 
     discount = (1 - price / fair) * 100
     if price <= deal_at:
+        if price < fair * TOO_GOOD_FRACTION or seller_looks_bulk(seller, price_text):
+            # Real, but too cheap to be true, or one of many identically
+            # priced items from the same account. Both are what a scam looks
+            # like from here, and neither is something arithmetic can judge.
+            return None
         return {
             "decision": "deal",
             "score": 5,
