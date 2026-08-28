@@ -1,9 +1,10 @@
 import re
 import time
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from logging import Logger
-from typing import Any, ClassVar, Generic, Optional, Type, TypeVar
+from typing import Any, ClassVar, Deque, Dict, Generic, Optional, Tuple, Type, TypeVar
 
 from diskcache import Cache  # type: ignore
 from openai import OpenAI  # type: ignore
@@ -31,6 +32,71 @@ def is_quota_error(exc: BaseException) -> bool:
             "too many requests", "resource_exhausted", "payload too large",
         )
     )
+
+
+# --- Per-minute token pacing ------------------------------------------------
+#
+# The free tiers are limited by TOKENS PER MINUTE far more tightly than by
+# requests per day: Groq allows 1000 requests/day but only 8000 tokens/minute,
+# and our prompts run ~800 tokens. A search returns dozens of listings which
+# are evaluated back to back, so the minute's budget is gone in seconds; every
+# service in the chain then fails, and the listing is dropped unrated. That is
+# what "no new items" looks like from the outside, with 999 of 1000 requests
+# still unused.
+#
+# Waiting for the window is the whole fix. Reactive backoff cannot work here:
+# the retry ceiling was 5s against a bucket that refills over 60s.
+
+DEFAULT_TOKENS_PER_MINUTE = 8000
+
+# Rough tokens-per-character for English/Slovak prose. Deliberately
+# pessimistic: over-estimating costs a short wait, under-estimating costs a
+# rate-limit error and a dropped listing.
+CHARS_PER_TOKEN = 3.0
+
+# What the model is allowed to write back, which also counts against the
+# budget.
+RESERVED_COMPLETION_TOKENS = 400
+
+_token_use: Dict[str, Deque[Tuple[float, int]]] = defaultdict(deque)
+
+
+# How long to wait for one service's budget before moving on. Each service in
+# the chain has its own bucket, so eight of them are worth ~50 listings a
+# minute between them -- far better than queueing behind the first.
+MAX_PACING_WAIT = 15
+
+
+def _pace_tokens(service: str, prompt: str, limit: int, logger: Logger | None = None) -> None:
+    """Reserve this prompt's tokens in the service's trailing-minute budget.
+
+    Waits briefly when the budget is nearly spent. If the wait would be long,
+    raises a rate-limit error instead so the caller falls through to the next
+    service, whose budget is separate -- the same handling a real 429 gets,
+    minus the failed request.
+    """
+    cost = int(len(prompt) / CHARS_PER_TOKEN) + RESERVED_COMPLETION_TOKENS
+    deadline = time.time() + MAX_PACING_WAIT
+    while True:
+        now = time.time()
+        used = _token_use[service]
+        while used and now - used[0][0] >= 60:
+            used.popleft()
+        spent = sum(tokens for _, tokens in used)
+        if spent + cost <= limit or not used:
+            used.append((now, cost))
+            return
+        wait = max(0.5, 60 - (now - used[0][0]))
+        if now + wait > deadline:
+            raise RuntimeError(
+                f"rate limit: {service} has {limit - spent} of {limit} tokens left "
+                f"this minute, needs {cost}; {wait:.0f}s to refill"
+            )
+        if logger:
+            logger.debug(
+                f"""{hilight("[AI]", "info")} {service}: {spent}/{limit} tokens used this minute, waiting {wait:.0f}s."""
+            )
+        time.sleep(min(wait, MAX_PACING_WAIT))
 
 
 class AIServiceProvider(Enum):
@@ -116,6 +182,7 @@ class AIConfig(BaseConfig):
     model: str | None = None
     base_url: str | None = None
     max_retries: int = 10
+    tokens_per_minute: int = DEFAULT_TOKENS_PER_MINUTE
     timeout: int | None = None
 
     def handle_provider(self: "AIConfig") -> None:
@@ -361,6 +428,9 @@ class OpenAIBackend(AIBackend):
             self.connect()
             assert self.client is not None
             try:
+                _pace_tokens(self.config.name, prompt,
+                             getattr(self.config, "tokens_per_minute", None)
+                             or DEFAULT_TOKENS_PER_MINUTE, self.logger)
                 response = self.client.chat.completions.create(
                     model=self.config.model or self.default_model,
                     messages=[
@@ -394,7 +464,13 @@ class OpenAIBackend(AIBackend):
                 # retrying 10x at a fixed 5s hammers an already-throttled
                 # endpoint, burns ~50s per listing, and makes the limit
                 # worse rather than letting it recover.
-                time.sleep(min(5 * (2 ** (retries - 1)), 120))
+                if is_quota_error(e):
+                    # The bucket refills over a minute; a 5s retry just
+                    # burns an attempt against a limit that has not moved.
+                    _token_use[self.config.name].clear()
+                    time.sleep(min(20 * retries, 60))
+                else:
+                    time.sleep(min(5 * (2 ** (retries - 1)), 120))
 
         if response is None:
             # Previously this fell through with `response` unbound, raising
@@ -532,6 +608,9 @@ class AnthropicBackend(AIBackend):
             self.connect()
             assert self.client is not None
             try:
+                _pace_tokens(self.config.name, prompt,
+                             getattr(self.config, "tokens_per_minute", None)
+                             or DEFAULT_TOKENS_PER_MINUTE, self.logger)
                 response = self.client.messages.create(
                     model=self.config.model or self.default_model,
                     max_tokens=1024,
@@ -558,7 +637,13 @@ class AnthropicBackend(AIBackend):
                 self.client = None
                 # Exponential backoff -- see the matching comment in the
                 # OpenAI-compatible backend above.
-                time.sleep(min(5 * (2 ** (retries - 1)), 120))
+                if is_quota_error(e):
+                    # The bucket refills over a minute; a 5s retry just
+                    # burns an attempt against a limit that has not moved.
+                    _token_use[self.config.name].clear()
+                    time.sleep(min(20 * retries, 60))
+                else:
+                    time.sleep(min(5 * (2 ** (retries - 1)), 120))
 
         if response is None:
             counter.increment(CounterItem.FAILED_AI_QUERY, item_config.name)

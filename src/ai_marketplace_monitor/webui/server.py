@@ -174,6 +174,37 @@ def _enumerate_urls(host: str, port: int) -> List[str]:
     return [f"http://{host}:{port}"]
 
 
+def _session_secret() -> str:
+    """The key session cookies are signed with, persisted across restarts.
+
+    This used to be secrets.token_urlsafe(32) generated per process, which
+    quietly made "remember me" useless: every restart signed with a new key,
+    so every existing cookie failed validation and the login page came back.
+    A 30-day cookie is only as durable as the key that signs it.
+
+    Kept out of the config file and readable only by its owner, since anyone
+    holding it can mint a valid session.
+    """
+    path = Path(amm_home) / "webui_secret"
+    try:
+        secret = path.read_text().strip()
+        if secret:
+            return secret
+    except OSError:
+        pass
+    secret = secrets.token_urlsafe(32)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(secret)
+        path.chmod(0o600)
+    except OSError:
+        # Unwritable home: fall back to a per-process key rather than
+        # refusing to serve. Logins then last only until the next restart,
+        # which is the old behaviour.
+        pass
+    return secret
+
+
 def create_app(
     config: WebUIConfig,
     state: AuthState,
@@ -187,8 +218,7 @@ def create_app(
         openapi_url=None,
     )
 
-    process_secret = secrets.token_urlsafe(32)
-    sessions = SessionManager(process_secret)
+    sessions = SessionManager(_session_secret())
     rate_limiter = RateLimiter()
 
     def is_open() -> bool:
