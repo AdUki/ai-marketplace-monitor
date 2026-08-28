@@ -265,6 +265,11 @@ BENCHMARK_CEILING = {
 # benchmark number and a formula cannot be talked round.
 PHONE_PRICE_C, PHONE_PRICE_P = 39.3, 0.828      # EUR per (AnTuTu/100k)^p
 LAPTOP_PRICE_C, LAPTOP_PRICE_P = 41.8, 0.882    # EUR per (PassMark/1000)^p
+# Desktops need their own curve: for the same CPU Mark a tower is worth far
+# less than a notebook -- no screen, battery or portability, and desktop
+# chips score higher per euro. Anchors (provisional): an i5-8400 tower
+# (~8,000) about EUR 140, a Ryzen 5 5600 machine (~21,000) about EUR 350.
+DESKTOP_PRICE_C, DESKTOP_PRICE_P = 19.4, 0.949
 # Below this there is no interesting phone at any price.
 MIN_USEFUL_ANTUTU = 300_000
 
@@ -300,7 +305,9 @@ def fair_price(facts: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(score, (int, float)) or isinstance(score, bool) or score <= 0:
         return out
 
-    if kind == "laptop":
+    if kind == "desktop":
+        value = DESKTOP_PRICE_C * (float(score) / 1000.0) ** DESKTOP_PRICE_P
+    elif kind == "laptop":
         value = LAPTOP_PRICE_C * (float(score) / 1000.0) ** LAPTOP_PRICE_P
     else:
         equiv = antutu_equivalent(facts)
@@ -344,7 +351,9 @@ def quality_score(facts: Dict[str, Any]) -> Dict[str, Any]:
     name = (facts.get("benchmark_name") or "").lower()
     ceiling = BENCHMARK_CEILING.get(name)
     if ceiling is None:
-        ceiling = BENCHMARK_CEILING["passmark_cpu" if facts.get("kind") == "laptop" else "antutu_v10"]
+        ceiling = BENCHMARK_CEILING[
+            "passmark_cpu" if facts.get("kind") in ("laptop", "desktop") else "antutu_v10"
+        ]
 
     parts: Dict[str, Any] = {}
     if isinstance(bench, (int, float)) and not isinstance(bench, bool) and bench > 0:
@@ -507,7 +516,7 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
     from . import benchmark_db as bdb
 
     out: Dict[str, Any] = {}
-    if kind == "laptop":
+    if kind in ("laptop", "desktop"):
         hit = bdb.lookup_cpu(title)
         if hit:
             out.update(chip=hit[0], benchmark_name="passmark_cpu", benchmark_score=hit[1])
@@ -540,10 +549,12 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
             chip = info.get("chip", "")
             out.update(chip=chip, ram_gb=info.get("ram_gb"),
                        release_year=info.get("release_year"))
-            table = "cpu_passmark" if kind == "laptop" else "soc_antutu_v10"
+            table = ("cpu_passmark" if kind in ("laptop", "desktop")
+                     else "soc_antutu_v10")
             score = chips.get(table, {}).get(chip)
             if score:
-                out["benchmark_name"] = ("passmark_cpu" if kind == "laptop"
+                out["benchmark_name"] = ("passmark_cpu"
+                                         if kind in ("laptop", "desktop")
                                          else "antutu_v10")
                 out["benchmark_score"] = score
     if out:
@@ -661,6 +672,13 @@ NON_COMPUTE_MARKERS = (
     "wacom", "graficky tablet", "grafický tablet", "intuos", "huion",
 )
 
+DESKTOP_HINTS = (
+    "stolny pocitac", "stolovy pocitac", "desktop", "zostava", "skrinka",
+    "herny pc", "herné pc", "gaming pc", "pc zostava", "tower", "imac",
+    "mac mini", "mac studio", "workstation", "staci pc", "starsi pc",
+    " pc ", "pocitac",
+)
+
 LAPTOP_HINTS = (
     "laptop", "notebook", "macbook", "thinkpad", "ideapad", "vivobook", "zenbook",
     "latitude", "elitebook", "probook", "inspiron", "pavilion", "chromebook",
@@ -705,9 +723,13 @@ def classify(title: str) -> str:
         return "other"
 
     # Laptops first: gaming models legitimately mention refresh rates ("144Hz")
-    # that would otherwise read as a monitor.
+    # that would otherwise read as a monitor. Laptop before desktop too, since
+    # "herny notebook" contains neither ambiguity but "PC" appears in plenty
+    # of laptop ads.
     if _has(t, LAPTOP_HINTS):
         return "laptop"
+    if _has(t, DESKTOP_HINTS):
+        return "desktop"
     if _has(t, NON_COMPUTE_MARKERS):
         return "other"
     if _has(t, MOBILE_HINTS):
@@ -722,7 +744,7 @@ def classify(title: str) -> str:
 def guess_kind(text: str) -> str:
     """Device kind for spec lookup; defaults to phone for unknown devices."""
     kind = classify(text)
-    return "laptop" if kind == "laptop" else "phone"
+    return kind if kind in ("laptop", "desktop") else "phone"
 
 
 def looks_benchmarkable(title: str) -> bool:

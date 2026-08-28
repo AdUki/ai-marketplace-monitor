@@ -248,3 +248,43 @@ class TestFairPrice(unittest.TestCase):
         for bad in ({"benchmark_score": "x"}, {"benchmark_score": True},
                     {"benchmark_score": -1}, {}):
             self.assertIsInstance(df.fair_price({"kind": "phone", **bad}), dict)
+
+
+class TestDesktopCurve(unittest.TestCase):
+    """A tower and a notebook with the same CPU are not worth the same."""
+
+    def price(self, kind, bench=9300):
+        return df.fair_price({"kind": kind, "benchmark_name": "passmark_cpu",
+                              "benchmark_score": bench, "ram_gb": [8]})
+
+    def test_desktop_is_cheaper_than_laptop_for_the_same_cpu(self):
+        self.assertLess(self.price("desktop")["fair_price_eur"],
+                        self.price("laptop")["fair_price_eur"])
+
+    def test_desktop_anchors(self):
+        self.assertAlmostEqual(self.price("desktop", 8000)["fair_price_eur"], 140, delta=20)
+        self.assertAlmostEqual(self.price("desktop", 21000)["fair_price_eur"], 350, delta=40)
+
+    def test_laptop_anchors_unchanged(self):
+        self.assertAlmostEqual(self.price("laptop", 5900)["fair_price_eur"], 200, delta=25)
+
+    def test_both_rise_with_cpu(self):
+        for kind in ("desktop", "laptop"):
+            vals = [self.price(kind, b)["fair_price_eur"] for b in (4000, 9000, 20000)]
+            self.assertEqual(vals, sorted(vals), kind)
+
+    def test_classification(self):
+        for t in ("Starší Pc", "Budget Gaming PC", "PC zostava i5", "iMac 2019",
+                  "Herný počítač", "Mac mini M1"):
+            self.assertEqual(df.classify(t), "desktop", t)
+        for t in ("Herný notebook Lenovo LOQ", "Lenovo ThinkPad T480",
+                  "MacBook Air M1", "ASUS X556UQ – notebook"):
+            self.assertEqual(df.classify(t), "laptop", t)
+
+    def test_laptop_wins_when_both_words_appear(self):
+        """'Notebook PC' is a laptop, not a tower."""
+        self.assertEqual(df.classify("HP Notebook PC 15"), "laptop")
+
+    def test_kind_is_passed_through(self):
+        self.assertEqual(df.guess_kind("Budget Gaming PC"), "desktop")
+        self.assertEqual(df.guess_kind("Samsung Galaxy S21"), "phone")
