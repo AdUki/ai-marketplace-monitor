@@ -239,6 +239,13 @@ class MarketplaceMonitor:
                 res = self.evaluate_by_ai(
                     listing, item_config=item_config, marketplace_config=marketplace_config
                 )
+                if res.score >= self.CONFIRM_SCORE and res.comment != AIResponse.NOT_EVALUATED:
+                    res = self.confirm_by_ai(
+                        listing,
+                        item_config=item_config,
+                        marketplace_config=marketplace_config,
+                        first_opinion=res,
+                    )
             if self.logger:
                 if res.comment == AIResponse.NOT_EVALUATED:
                     if res.name:
@@ -842,6 +849,53 @@ class MarketplaceMonitor:
                     # User(self.config.user[user], logger=self.logger).notify(
                     #     [listing], [rating], item_config, force=True
                     # )
+
+    # A model asked to price a device it has no data for will invent a number.
+    # A Huawei MediaPad T3 10 at EUR 40 was notified as "55% off a EUR 90
+    # resale value" -- the EUR 90 was made up; the tablet is worth about what
+    # it was listed for. Another service, asked the same question in the same
+    # round, rated it 2 and said so. The verdict that reached the phone was
+    # simply whichever service answered first.
+    #
+    # So a top score that rests only on a model's memory gets a second
+    # opinion. This is cheap: it costs one extra request per would-be
+    # notification, and those are rare. Verdicts backed by benchmark data
+    # skip it -- there is nothing to second-guess about arithmetic.
+    CONFIRM_SCORE = 5
+
+    def confirm_by_ai(
+        self: "MarketplaceMonitor",
+        item: Listing,
+        item_config: TItemConfig,
+        marketplace_config: TMarketplaceConfig,
+        first_opinion: AIResponse,
+    ) -> AIResponse:
+        """Have a different service check a top score before it is notified."""
+        for agent in self.ai_agents:
+            if agent.config.name == first_opinion.name:
+                continue
+            try:
+                # Not from cache: the cache key does not name the service,
+                # so a cached read here would hand back the very answer we
+                # are trying to check.
+                second = agent.evaluate(
+                    item, item_config, marketplace_config, use_cache=False
+                )
+            except KeyboardInterrupt:
+                raise
+            except Exception:  # noqa: BLE001 - no confirmation available
+                continue
+            if second.score >= self.CONFIRM_SCORE:
+                return first_opinion
+            if self.logger:
+                self.logger.info(
+                    f"""{hilight("[AI]", "info")} {agent.config.name} disagrees with """
+                    f"""{first_opinion.name} about {hilight(item.title)}: """
+                    f"""{second.score} vs {first_opinion.score}. Not notifying. """
+                    f"""({second.comment})"""
+                )
+            return second
+        return first_opinion
 
     def evaluate_by_ai(
         self: "MarketplaceMonitor",

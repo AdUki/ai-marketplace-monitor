@@ -375,6 +375,7 @@ class AIBackend(Generic[TAIConfig]):
         listing: Listing,
         item_config: TItemConfig,
         marketplace_config: TMarketplaceConfig,
+        use_cache: bool = True,
     ) -> AIResponse:
         raise NotImplementedError("Confirm method must be implemented by subclasses.")
 
@@ -407,11 +408,16 @@ class OpenAIBackend(AIBackend):
         listing: Listing,
         item_config: TItemConfig,
         marketplace_config: TMarketplaceConfig,
+        use_cache: bool = True,
     ) -> AIResponse:
         # ask openai to confirm the item is correct
         counter.increment(CounterItem.AI_QUERY, item_config.name)
         prompt = self.get_prompt(listing, item_config, marketplace_config)
-        res: AIResponse | None = AIResponse.from_cache(listing, item_config, marketplace_config)
+        res: AIResponse | None = (
+            AIResponse.from_cache(listing, item_config, marketplace_config)
+            if use_cache
+            else None
+        )
         if res is not None:
             if self.logger:
                 self.logger.debug(
@@ -532,7 +538,8 @@ class OpenAIBackend(AIBackend):
         words = [x for x in comment.split() if x.strip()]
         comment = " ".join(words[:30]) + ("..." if len(words) > 30 else "")
         res = AIResponse(name=self.config.name, score=score, comment=comment)
-        res.to_cache(listing, item_config, marketplace_config)
+        if use_cache:
+            res.to_cache(listing, item_config, marketplace_config)
         counter.increment(CounterItem.NEW_AI_QUERY, item_config.name)
         return res
 
@@ -588,10 +595,15 @@ class AnthropicBackend(AIBackend):
         listing: Listing,
         item_config: TItemConfig,
         marketplace_config: TMarketplaceConfig,
+        use_cache: bool = True,
     ) -> AIResponse:
         counter.increment(CounterItem.AI_QUERY, item_config.name)
         prompt = self.get_prompt(listing, item_config, marketplace_config)
-        res: AIResponse | None = AIResponse.from_cache(listing, item_config, marketplace_config)
+        res: AIResponse | None = (
+            AIResponse.from_cache(listing, item_config, marketplace_config)
+            if use_cache
+            else None
+        )
         if res is not None:
             if self.logger:
                 self.logger.debug(
@@ -681,6 +693,7 @@ class AnthropicBackend(AIBackend):
 
         comment = " ".join([x for x in comment.split() if x.strip()]).strip()
         res = AIResponse(name=self.config.name, score=score, comment=comment)
-        res.to_cache(listing, item_config, marketplace_config)
+        if use_cache:
+            res.to_cache(listing, item_config, marketplace_config)
         counter.increment(CounterItem.NEW_AI_QUERY, item_config.name)
         return res
