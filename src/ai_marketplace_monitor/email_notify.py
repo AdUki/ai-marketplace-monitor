@@ -14,7 +14,8 @@ import inflect
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
 
-from .ai import AIResponse  # type: ignore
+from .ai import AIResponse
+from .notification import verdict_source  # type: ignore
 from .listing import Listing
 from .notification import NotificationConfig, NotificationStatus
 from .utils import fetch_with_retry, hilight, resize_image_data
@@ -156,7 +157,7 @@ class EmailNotificationConfig(NotificationConfig):
                     f"{prefix} [{rating.conclusion} ({rating.score})] {listing.title}\n"
                     f"{listing.price}, {listing.location}\n"
                     f"{listing.post_url.split('?')[0]}\n"
-                    f"\nAI: {rating.comment}"
+                    f"\n{verdict_source(rating)}: {rating.comment}"
                 )
             )
         message = "\n\n".join(messages)

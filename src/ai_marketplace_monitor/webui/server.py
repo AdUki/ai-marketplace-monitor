@@ -710,6 +710,12 @@ img{max-width:100%;height:auto}
 .q{font-weight:700}.q.good{color:var(--good)}.q.ok{color:var(--ok)}.q.weak{color:var(--bad)}
 .ai{margin-top:9px;font-size:13px;color:var(--fg);background:#12151b;
     border-left:3px solid var(--link);padding:7px 9px;border-radius:0 7px 7px 0}
+/* Who decided: arithmetic over benchmark data, or a language model. They are
+   wrong in different ways, so the verdict says which one it came from. */
+.src{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;
+     padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px}
+.src-script{background:#123524;color:#4ade80;border:1px solid #1c5637}
+.src-ai{background:#1e2537;color:#93b4ff;border:1px solid #2f3d5e}
 .desc{margin-top:8px;font-size:13px;color:var(--dim);white-space:pre-wrap;
       max-height:4.4em;overflow:hidden}
 .desc.open{max-height:none}
@@ -788,7 +794,7 @@ function card(it,i){
     ${specChips(s)}
     ${it.unrated?`<div class="flag">never rated - the AI call failed at the time</div>`:""}
     ${it.stale&&!it.unrated?`<div class="flag">rated under earlier criteria</div>`:""}
-    ${it.ai_comment?`<div class="ai">${E(it.ai_comment)}</div>`:""}
+    ${it.ai_comment?`<div class="ai"><span class="src ${it.verdict_by==="benchmark tables"?"src-script":"src-ai"}">${it.verdict_by==="benchmark tables"?"SCRIPT":"AI"}</span>${E(it.ai_comment)}</div>`:""}
     ${it.description?`<div class="desc" id="d${i}">${E(it.description)}</div>
       <button class="more" onclick="document.getElementById('d${i}').classList.toggle('open')">show more / less</button>`:""}
     <div class="actions">

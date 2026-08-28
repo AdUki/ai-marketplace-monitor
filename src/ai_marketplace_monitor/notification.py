@@ -13,6 +13,22 @@ from .listing import Listing
 from .utils import BaseConfig, hilight
 
 
+# The deterministic path names itself "benchmark tables"; every other verdict
+# comes from a language model. Which one decided matters when you read the
+# notification: a number computed from a benchmark score is a different kind
+# of claim from a model's opinion, and only one of them can be wrong about
+# what a device is worth without anything else noticing.
+SCRIPT_VERDICT_NAME = "benchmark tables"
+
+
+def verdict_source(rating: AIResponse) -> str:
+    """Short label naming what produced this verdict."""
+    name = (rating.name or "").strip()
+    if name == SCRIPT_VERDICT_NAME:
+        return "Script"
+    return f"AI ({name})" if name else "AI"
+
+
 class NotificationStatus(Enum):
     NOT_NOTIFIED = 0
     EXPIRED = 1
@@ -365,7 +381,7 @@ class PushNotificationConfig(NotificationConfig):
                         f"{listing.price}, {listing.location}\n"
                         f"{listing.post_url.split('?')[0]}\n{desc}{desc_newline}"
                         + (f"\nSpecs: {specs}" if specs else "")
-                        + f"\nAI: {rating.comment}"
+                        + f"\n{verdict_source(rating)}: {rating.comment}"
                     )
                 )
             elif self.message_format == "markdown":
@@ -383,7 +399,7 @@ class PushNotificationConfig(NotificationConfig):
                         f"{listing.price}, {listing.location}\n"
                         f"{desc}{desc_newline}"
                         + (f"\n**Specs**: {specs}" if specs else "")
-                        + f"\n**AI**: {rating.comment}"
+                        + f"\n**{verdict_source(rating)}**: {rating.comment}"
                     )
                 )
             elif self.message_format == "html":
@@ -399,7 +415,7 @@ class PushNotificationConfig(NotificationConfig):
                         f"""<a href="{listing.post_url.split("?")[0]}"><b>{listing.title}</b></a>"""
                         f"<br>{listing.price}, {listing.location}<br>"
                         f"{desc}{desc_newline}"
-                        f"<br><b>AI</b>: <i>{rating.comment}</i>"
+                        f"<br><b>{verdict_source(rating)}</b>: <i>{rating.comment}</i>"
                     )
                 )
             msgs[ns].append((listing, msg))

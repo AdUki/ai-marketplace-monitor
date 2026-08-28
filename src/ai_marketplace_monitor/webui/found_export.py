@@ -33,6 +33,7 @@ CSV_COLUMNS: List[str] = [
     "price",
     "rating",
     "ai_comment",
+    "verdict_by",
     "location",
     "seller",
     "condition",
@@ -166,6 +167,10 @@ def _to_row(
         "price": (price if price is not None else details.get("price", "")) or "",
         "rating": str(rating["score"]) if "score" in rating else "",
         "ai_comment": rating.get("comment", "") or "",
+        # Which of the two things decided: arithmetic over benchmark data, or
+        # a language model. Worth showing, because they can be wrong in very
+        # different ways.
+        "verdict_by": rating.get("name", "") or "",
         "location": details.get("location", "") or "",
         "seller": details.get("seller", "") or "",
         "condition": details.get("condition", "") or "",
