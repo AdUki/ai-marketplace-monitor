@@ -343,3 +343,45 @@ class TestStorageInPrice(unittest.TestCase):
             r = df.fair_price({"kind": "laptop", "benchmark_name": "passmark_cpu",
                                "benchmark_score": 9300, "ram_gb": [8], "storage_gb": bad})
             self.assertIn("fair_price_eur", r, bad)
+
+
+class TestDeterministicRouting(unittest.TestCase):
+    """Arithmetic decides the clear cases; the model gets the rest."""
+
+    S21 = "Samsung Galaxy S21 5G 128GB"
+
+    def test_clear_deal_is_decided_without_ai(self):
+        v = df.deterministic_deal(self.S21, "€100")
+        self.assertIsNotNone(v)
+        self.assertEqual(v["score"], 5)
+        self.assertIn("fair price", v["comment"])
+
+    def test_ordinary_price_goes_to_ai(self):
+        self.assertIsNone(df.deterministic_deal(self.S21, "€250"))
+
+    def test_boundary_is_inclusive(self):
+        facts = df.facts_for_listing(self.S21)
+        at = facts.get("deal_price_eur")
+        if at:
+            self.assertIsNotNone(df.deterministic_deal(self.S21, f"€{at}"))
+            self.assertIsNone(df.deterministic_deal(self.S21, f"€{at + 1}"))
+
+    def test_unknown_device_goes_to_ai(self):
+        self.assertIsNone(df.deterministic_deal("Nejaky neznamy telefon XYZ", "€50"))
+
+    def test_unparseable_price_goes_to_ai(self):
+        for p in ("", None, "dohodou", "cena dohodou"):
+            self.assertIsNone(df.deterministic_deal(self.S21, p), p)
+
+    def test_free_listings_go_to_ai(self):
+        """Zero is not a bargain signal -- it usually means 'ask me'."""
+        self.assertIsNone(df.deterministic_deal(self.S21, "Free"))
+
+    def test_weak_device_never_auto_notifies(self):
+        """However cheap, a device below the usefulness floor is not pushed."""
+        self.assertIsNone(df.deterministic_deal("Honor 8x", "€5"))
+
+    def test_verdict_explains_itself(self):
+        v = df.deterministic_deal(self.S21, "€100")
+        for expected in ("asking", "fair price", "deal threshold", "benchmark"):
+            self.assertIn(expected, v["comment"].lower())

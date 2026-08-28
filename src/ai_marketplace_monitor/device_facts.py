@@ -773,6 +773,77 @@ def looks_benchmarkable(title: str) -> bool:
     return classify(title) != "other"
 
 
+def parse_price(text: Any) -> Optional[float]:
+    """Pull a number out of a marketplace price string.
+
+    Handles "EUR 190", "190 EUR", "190,50", "1 200 EUR" and the ranges
+    Facebook sometimes renders ("40 | 70" -> take the lower, which is what
+    the buyer would pay).
+    """
+    if isinstance(text, (int, float)) and not isinstance(text, bool):
+        return float(text)
+    if not isinstance(text, str):
+        return None
+    t = text.replace("\u00a0", " ")
+    if re.search(r"\b(free|zadarmo|zdarma)\b", t, re.I):
+        return 0.0
+    nums = []
+    for raw in re.findall(r"\d[\d \u00a0.,]*", t):
+        cleaned = raw.replace(" ", "").replace("\u00a0", "")
+        # 1.299,50 and 1,299.50 both mean the same amount
+        if "," in cleaned and "." in cleaned:
+            cleaned = (cleaned.replace(".", "").replace(",", ".")
+                       if cleaned.rfind(",") > cleaned.rfind(".")
+                       else cleaned.replace(",", ""))
+        elif "," in cleaned:
+            cleaned = cleaned.replace(",", "." if len(cleaned.split(",")[-1]) == 2 else "")
+        else:
+            cleaned = cleaned.replace(".", "") if cleaned.count(".") == 1 and len(cleaned.split(".")[-1]) == 3 else cleaned
+        try:
+            nums.append(float(cleaned))
+        except ValueError:
+            continue
+    nums = [n for n in nums if n >= 0]
+    return min(nums) if nums else None
+
+
+def deterministic_deal(title: str, price_text: Any, kind: str = "auto") -> Optional[Dict[str, Any]]:
+    """Decide from data alone whether a listing is a deal.
+
+    Returns a verdict only when the numbers are sufficient to be sure:
+    a known benchmark, a computed fair price, and an asking price at or
+    below the deal threshold. Anything else returns None so the AI decides
+    -- unknown specs, an unparseable price, or simply not cheap enough.
+
+    This exists because the arithmetic is more reliable than the model on
+    exactly the question the model kept getting wrong.
+    """
+    price = parse_price(price_text)
+    if price is None or price <= 0:
+        return None
+    facts = facts_for_listing(title, kind=kind)
+    if not facts or not has_real_facts(facts):
+        return None
+    if facts.get("too_weak"):
+        return None
+    deal_at = facts.get("deal_price_eur")
+    fair = facts.get("fair_price_eur")
+    if not deal_at or not fair:
+        return None
+    if price > deal_at:
+        return None
+    discount = (1 - price / fair) * 100
+    return {
+        "score": 5,
+        "comment": (
+            f"{facts.get('chip', 'device')}: asking EUR {price:.0f} vs computed fair "
+            f"price EUR {fair} ({discount:.0f}% below) - deal threshold is EUR {deal_at}. "
+            f"Verified from benchmark data, not estimated."
+        ),
+        "facts": facts,
+    }
+
+
 def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     """Cache-only facts for a listing title, queueing a lookup on a miss.
 

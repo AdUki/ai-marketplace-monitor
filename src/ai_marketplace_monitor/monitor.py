@@ -199,10 +199,36 @@ class MarketplaceMonitor:
                         ),
                     )
                 continue
-            # for x in self.find_new_items(found_items)
-            res = self.evaluate_by_ai(
-                listing, item_config=item_config, marketplace_config=marketplace_config
-            )
+            # Data first, model second. When the benchmark tables give a
+            # fair price and the asking price is at or below the deal
+            # threshold, that is a arithmetic fact and needs no second
+            # opinion -- so it is notified immediately and no AI request is
+            # spent. Everything else (not cheap enough, unknown specs,
+            # unparseable price) goes to the model, which is better at
+            # condition, damage and scam signals than at valuation.
+            res = None
+            try:
+                from .device_facts import deterministic_deal
+
+                verdict = deterministic_deal(listing.title, listing.price)
+                if verdict:
+                    res = AIResponse(
+                        score=verdict["score"],
+                        comment=verdict["comment"],
+                        name="benchmark tables",
+                    )
+                    if self.logger:
+                        self.logger.info(
+                            f"""{hilight("[Deal]", "succ")} {hilight(listing.title)} clears the computed price bar; notifying without an AI call."""
+                        )
+            except Exception as e:  # noqa: BLE001 - fall back to the model
+                if self.logger:
+                    self.logger.debug(f"[Deal] deterministic check unavailable: {e}")
+
+            if res is None:
+                res = self.evaluate_by_ai(
+                    listing, item_config=item_config, marketplace_config=marketplace_config
+                )
             if self.logger:
                 if res.comment == AIResponse.NOT_EVALUATED:
                     if res.name:
