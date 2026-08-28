@@ -492,7 +492,10 @@ def _record_to_database(facts: Dict[str, Any], kind: str) -> None:
     memory rather than from a source and are not worth freezing into a
     database.
     """
-    from . import benchmark_db as bdb
+    try:
+        from . import benchmark_db as bdb
+    except ImportError:  # run as a standalone file, not a package member
+        import benchmark_db as bdb
 
     score = facts.get("benchmark_score")
     name = facts.get("model") or facts.get("query")
@@ -534,7 +537,10 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
          submission-driven device list happens not to carry (it has no
          Galaxy S20, Redmi Note 12 or Honor 8X, for instance).
     """
-    from . import benchmark_db as bdb
+    try:
+        from . import benchmark_db as bdb
+    except ImportError:  # run as a standalone file, not a package member
+        import benchmark_db as bdb
 
     out: Dict[str, Any] = {}
     if kind in ("laptop", "desktop"):
@@ -605,6 +611,12 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     """
     cache = _load(FACTS_CACHE)
     key = model_key(model)
+    if not is_identifiable(key):
+        # Brand without model: no table, override or lookup can honestly
+        # answer it, and every one of them used to answer anyway.
+        return {"query": model, "kind": kind if kind != "auto" else guess_kind(model),
+                "specs_error": "no model in title"}
+
     if not refresh and key in cache:
         return cache[key]
 
@@ -635,10 +647,10 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     for ov_key, ov in _load(OVERRIDES).items():
         # Normalize the override key too, so an entry written naturally
         # ("iPhone 11 phone") still matches a key that has had filler words
-        # stripped. Match either direction: an override may be broader
-        # ("galaxy s21") or narrower than the key derived from the title.
+        # stripped. Identity rules apply: an override for the S21 must not
+        # bleed onto the S21 Ultra, nor onto a bare "Samsung".
         ov_norm = model_key(ov_key)
-        if ov_norm and (ov_norm in key or key in ov_norm):
+        if ov_norm and override_applies(key, ov_norm):
             facts.update(ov)
             facts["overridden"] = True
 
@@ -677,6 +689,7 @@ ACCESSORY_MARKERS = (
     "backpack", "sleeve", "ssd disk", "hdd", "ram modul", "pamet", "pamäť",
     "chladic", "chladič", "cooler", "webcam", "hub", "redukcia", "napajaci",
     "napájací", "power supply", "diely", "nahradne", "náhradné",
+    "galaxy ring", "smart ring", "smartwatch", "galaxy fit", "mi band",
 )
 
 # Devices with no comparable CPU/SoC benchmark in this scheme.
@@ -807,41 +820,156 @@ def parse_price(text: Any) -> Optional[float]:
     return min(nums) if nums else None
 
 
-def deterministic_deal(title: str, price_text: Any, kind: str = "auto") -> Optional[Dict[str, Any]]:
-    """Decide from data alone whether a listing is a deal.
+def deterministic_verdict(
+    title: str, price_text: Any, kind: str = "auto"
+) -> Optional[Dict[str, Any]]:
+    """Settle a listing from data alone, or hand it to the model.
 
-    Returns a verdict only when the numbers are sufficient to be sure:
-    a known benchmark, a computed fair price, and an asking price at or
-    below the deal threshold. Anything else returns None so the AI decides
-    -- unknown specs, an unparseable price, or simply not cheap enough.
+    Returns one of:
+      {"decision": "deal",   ...}  price is at or below the computed bar
+      {"decision": "reject", ...}  specs are known and it is not cheap enough
+      None                         not enough information; the model decides
 
-    This exists because the arithmetic is more reliable than the model on
-    exactly the question the model kept getting wrong.
+    Both outcomes are final when the numbers are complete. Sending a
+    known-and-not-cheap-enough listing to the model wastes a rate-limited
+    request on a question arithmetic already answered -- and invites it to
+    talk itself into a "deal" on specs, which is the failure this whole
+    path exists to prevent.
     """
-    price = parse_price(price_text)
-    if price is None or price <= 0:
-        return None
     facts = facts_for_listing(title, kind=kind)
     if not facts or not has_real_facts(facts):
-        return None
+        return None                      # unknown device -> model
+
+    price = parse_price(price_text)
+    if price is None or price <= 0:
+        return None                      # no usable price -> model
+
     if facts.get("too_weak"):
-        return None
+        return {
+            "decision": "reject",
+            "score": 1,
+            "comment": (
+                f"{facts.get('chip', 'device')} is below the usable-performance "
+                f"floor ({facts.get('antutu_equivalent', 0):,} AnTuTu-equivalent); "
+                f"not worth buying at any price."
+            ),
+            "facts": facts,
+        }
+
     deal_at = facts.get("deal_price_eur")
     fair = facts.get("fair_price_eur")
     if not deal_at or not fair:
-        return None
-    if price > deal_at:
-        return None
+        return None                      # no computed price -> model
+
     discount = (1 - price / fair) * 100
+    if price <= deal_at:
+        return {
+            "decision": "deal",
+            "score": 5,
+            "comment": (
+                f"{facts.get('chip', 'device')}: asking EUR {price:.0f} vs computed "
+                f"fair price EUR {fair} ({discount:.0f}% below); deal threshold is "
+                f"EUR {deal_at}. Verified from benchmark data, not estimated."
+            ),
+            "facts": facts,
+        }
     return {
-        "score": 5,
+        "decision": "reject",
+        "score": 2 if discount > 25 else 1,
         "comment": (
             f"{facts.get('chip', 'device')}: asking EUR {price:.0f} vs computed fair "
-            f"price EUR {fair} ({discount:.0f}% below) - deal threshold is EUR {deal_at}. "
-            f"Verified from benchmark data, not estimated."
+            f"price EUR {fair} ({discount:.0f}% below); needs EUR {deal_at} or less. "
+            f"Not a deal."
         ),
         "facts": facts,
     }
+
+
+def deterministic_deal(title: str, price_text: Any, kind: str = "auto") -> Optional[Dict[str, Any]]:
+    """Backwards-compatible wrapper: only the positive verdict."""
+    v = deterministic_verdict(title, price_text, kind)
+    return v if v and v["decision"] == "deal" else None
+
+
+# A model key that is only a brand, or a brand plus a generic word, identifies
+# nothing. Matching on it produced confident nonsense, so it is refused
+# outright rather than fuzzily resolved.
+_GENERIC_KEY_WORDS = {
+    "samsung", "apple", "iphone", "ipad", "xiaomi", "huawei", "honor", "redmi",
+    "realme", "oppo", "vivo", "nokia", "motorola", "lenovo", "asus", "acer",
+    "dell", "hp", "msi", "lg", "sony", "google", "pixel", "oneplus", "poco",
+    "galaxy", "macbook", "notebook", "laptop", "telefon", "phone", "mobil",
+    "smartphone", "tablet", "pc", "computer", "pocitac", "gaming", "hidden",
+    "information", "mac", "air", "pro", "mini", "plus", "ultra", "max", "lite",
+}
+
+
+def is_identifiable(key: str) -> bool:
+    """True if a model key names a specific device rather than a brand.
+
+    Requires either a model number ("s21", "a54", "t480") or a distinctive
+    non-generic word. "samsung", "apple macbook" and "gaming pc" fail; they
+    match a whole product line, not a product.
+    """
+    if not key:
+        return False
+    tokens = key.split()
+    if any(any(c.isdigit() for c in t) for t in tokens):
+        return True
+    return any(t not in _GENERIC_KEY_WORDS for t in tokens)
+
+
+def same_device(a: str, b: str) -> bool:
+    """True if two model keys name the same device.
+
+    Reuses the table matcher's identity rules: model numbers must agree
+    exactly and variant words ("pro", "ultra", "fe") must be present on both
+    sides or neither -- an "iPhone 12" is not an "iPhone 12 Pro Max".
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        from .benchmark_db import match_device
+    except ImportError:  # run as a standalone file, not a package member
+        try:
+            from benchmark_db import match_device
+        except ImportError:  # pragma: no cover
+            return False
+    return match_device(a, {b: 0}) is not None
+
+
+def override_applies(key: str, ov_norm: str) -> bool:
+    """True if a hand-written override covers this model key.
+
+    An override may be deliberately broader than a listing key -- "galaxy s21"
+    is meant to cover "Samsung Galaxy S21 5G 128GB" -- so it need not name the
+    brand. It may never contradict identity though: model numbers must agree
+    exactly and variant words must match, so an S21 override stays off the
+    S21 Ultra and a bare "samsung" override cannot exist at all.
+    """
+    if not key or not ov_norm:
+        return False
+    if key == ov_norm:
+        return True
+    try:
+        from .benchmark_db import (_VARIANTS, _close_to_any, _model_numbers,
+                                   _signature, _tokens)
+    except ImportError:  # run as a standalone file, not a package member
+        try:
+            from benchmark_db import (_VARIANTS, _close_to_any, _model_numbers,
+                                      _signature, _tokens)
+        except ImportError:  # pragma: no cover
+            return False
+    k_sig, o_sig = _signature(_tokens(key)), _signature(_tokens(ov_norm))
+    if not o_sig or _model_numbers(k_sig) != _model_numbers(o_sig):
+        return False
+    if (k_sig & _VARIANTS) != (o_sig & _VARIANTS):
+        return False
+    # Every word the override names must be present in the key; the key may
+    # carry extra words (brand, colour, capacity) the override omitted.
+    return all(w in k_sig or _close_to_any(w, k_sig) for w in o_sig)
 
 
 def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
@@ -854,12 +982,19 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     """
     cache = _load(FACTS_CACHE)
     key = model_key(title)
+    if not is_identifiable(key):
+        # A brand with no model ("samsung", "iphone") names no device. Never
+        # resolve it and never queue it: guessing here priced a bare "Samsung"
+        # fridge as a flagship phone and called EUR 100 a deal.
+        return device_facts(title, offline=True, kind=kind)
     hit = cache.get(key)
     if hit is None:
-        # Containment match, so a longer cached key still serves a shorter
-        # title (and vice versa) rather than triggering a fresh lookup.
+        # A cached entry serves this listing only if it is the SAME device.
+        # Plain substring containment was not: "samsung" is contained in
+        # "samsung galaxy s24 ultra", so every vague title inherited the
+        # specs of whichever flagship happened to be cached.
         for cached_key, facts in cache.items():
-            if cached_key and (cached_key in key or key in cached_key):
+            if cached_key and same_device(key, cached_key):
                 hit = facts
                 break
     if hit is not None and has_real_facts(hit):

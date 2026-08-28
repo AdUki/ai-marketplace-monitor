@@ -208,9 +208,9 @@ class MarketplaceMonitor:
             # condition, damage and scam signals than at valuation.
             res = None
             try:
-                from .device_facts import deterministic_deal
+                from .device_facts import deterministic_verdict
 
-                verdict = deterministic_deal(listing.title, listing.price)
+                verdict = deterministic_verdict(listing.title, listing.price)
                 if verdict:
                     res = AIResponse(
                         score=verdict["score"],
@@ -218,9 +218,14 @@ class MarketplaceMonitor:
                         name="benchmark tables",
                     )
                     if self.logger:
-                        self.logger.info(
-                            f"""{hilight("[Deal]", "succ")} {hilight(listing.title)} clears the computed price bar; notifying without an AI call."""
-                        )
+                        if verdict["decision"] == "deal":
+                            self.logger.info(
+                                f"""{hilight("[Deal]", "succ")} {hilight(listing.title)} clears the computed price bar; notifying without an AI call."""
+                            )
+                        else:
+                            self.logger.debug(
+                                f"""{hilight("[Deal]", "dim")} {listing.title}: settled from benchmark data, no AI call needed."""
+                            )
             except Exception as e:  # noqa: BLE001 - fall back to the model
                 if self.logger:
                     self.logger.debug(f"[Deal] deterministic check unavailable: {e}")
