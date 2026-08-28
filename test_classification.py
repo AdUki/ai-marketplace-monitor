@@ -288,3 +288,58 @@ class TestDesktopCurve(unittest.TestCase):
     def test_kind_is_passed_through(self):
         self.assertEqual(df.guess_kind("Budget Gaming PC"), "desktop")
         self.assertEqual(df.guess_kind("Samsung Galaxy S21"), "phone")
+
+
+class TestStorageInPrice(unittest.TestCase):
+    """Storage values a computer, but must not outweigh its processor."""
+
+    def comp(self, kind, gb, bench=9300):
+        return df.fair_price({"kind": kind, "benchmark_name": "passmark_cpu",
+                              "benchmark_score": bench, "ram_gb": [8],
+                              "storage_gb": [gb]})["fair_price_eur"]
+
+    def test_more_storage_is_worth_more(self):
+        for kind in ("laptop", "desktop"):
+            vals = [self.comp(kind, g) for g in (128, 256, 512, 1024)]
+            self.assertEqual(vals, sorted(vals), kind)
+
+    def test_baseline_is_neutral(self):
+        with_256 = self.comp("laptop", 256)
+        without = df.fair_price({"kind": "laptop", "benchmark_name": "passmark_cpu",
+                                 "benchmark_score": 9300, "ram_gb": [8]})["fair_price_eur"]
+        self.assertEqual(with_256, without)
+
+    def test_effect_is_proportionate(self):
+        """Doubling the drive must not double the machine."""
+        base, doubled = self.comp("laptop", 256), self.comp("laptop", 512)
+        self.assertLess(doubled, base * 1.25)
+        self.assertGreater(doubled, base * 1.02)
+
+    def test_storage_cannot_outweigh_the_cpu(self):
+        """A weak machine with a huge disk stays cheaper than a strong one."""
+        weak_big = self.comp("laptop", 4096, bench=3620)
+        strong_small = self.comp("laptop", 128, bench=24437)
+        self.assertLess(weak_big, strong_small)
+
+    def test_phones_ignore_storage(self):
+        a = df.fair_price({"kind": "phone", "benchmark_name": "antutu_v10",
+                           "benchmark_score": 800_000, "ram_gb": [8],
+                           "storage_gb": [64]})["fair_price_eur"]
+        b = df.fair_price({"kind": "phone", "benchmark_name": "antutu_v10",
+                           "benchmark_score": 800_000, "ram_gb": [8],
+                           "storage_gb": [1024]})["fair_price_eur"]
+        self.assertEqual(a, b)
+
+    def test_smallest_variant_used(self):
+        """A model sold up to 2TB is not priced as though it has 2TB."""
+        self.assertEqual(
+            df.fair_price({"kind": "laptop", "benchmark_name": "passmark_cpu",
+                           "benchmark_score": 9300, "ram_gb": [8],
+                           "storage_gb": [256, 512, 2048]})["fair_price_eur"],
+            self.comp("laptop", 256))
+
+    def test_junk_storage_values_ignored(self):
+        for bad in ([0], [-5], [None], ["512GB"], [True]):
+            r = df.fair_price({"kind": "laptop", "benchmark_name": "passmark_cpu",
+                               "benchmark_score": 9300, "ram_gb": [8], "storage_gb": bad})
+            self.assertIn("fair_price_eur", r, bad)

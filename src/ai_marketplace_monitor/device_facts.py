@@ -270,6 +270,15 @@ LAPTOP_PRICE_C, LAPTOP_PRICE_P = 41.8, 0.882    # EUR per (PassMark/1000)^p
 # chips score higher per euro. Anchors (provisional): an i5-8400 tower
 # (~8,000) about EUR 140, a Ryzen 5 5600 machine (~21,000) about EUR 350.
 DESKTOP_PRICE_C, DESKTOP_PRICE_P = 19.4, 0.949
+# Storage moves the price of a computer in a way it does not for a phone:
+# drives are replaceable and separately priced, so a 1TB machine really is
+# worth more than the same machine with 256GB. 256GB is the baseline; the
+# exponent keeps the effect proportionate -- doubling to 512GB adds about
+# 11%, 1TB about 23%, and 128GB takes off about 10% -- and it is clamped so
+# a huge array cannot outweigh the processor.
+STORAGE_BASELINE_GB = 256
+STORAGE_EXPONENT = 0.15
+STORAGE_CLAMP = (0.85, 1.35)
 # Below this there is no interesting phone at any price.
 MIN_USEFUL_ANTUTU = 300_000
 
@@ -323,6 +332,18 @@ def fair_price(facts: Dict[str, Any]) -> Dict[str, Any]:
            if isinstance(r, (int, float)) and not isinstance(r, bool) and r > 0]
     if ram:
         value *= min(max(min(ram) / 8.0, 0.6), 1.4) ** 0.3
+
+    # Storage counts for computers only. On a phone it is soldered in and
+    # barely moves the second-hand price; on a PC or laptop the drive is a
+    # separately valued component.
+    if kind in ("laptop", "desktop"):
+        storage = [g for g in (facts.get("storage_gb") or [])
+                   if isinstance(g, (int, float)) and not isinstance(g, bool) and g > 0]
+        if storage:
+            mult = (min(storage) / STORAGE_BASELINE_GB) ** STORAGE_EXPONENT
+            mult = min(max(mult, STORAGE_CLAMP[0]), STORAGE_CLAMP[1])
+            value *= mult
+            out["storage_factor"] = round(mult, 3)
 
     out["fair_price_eur"] = int(round(value))
     # Half of fair value is the buyer's bar for "a deal".
