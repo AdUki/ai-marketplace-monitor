@@ -855,6 +855,10 @@ DAMAGE_MARKERS = (
 )
 
 
+# What a broken device is worth: parts money, not a discount off retail.
+DAMAGED_PRICE_FRACTION = 0.20
+
+
 def looks_damaged(text: str) -> bool:
     """True if the listing says the device is broken, locked or for parts."""
     return any(m in _norm(text) or m in text.lower() for m in DAMAGE_MARKERS)
@@ -876,10 +880,7 @@ def deterministic_verdict(
     talk itself into a "deal" on specs, which is the failure this whole
     path exists to prevent.
     """
-    if looks_damaged(f"{title} {text}"):
-        # A benchmark describes a working device. Whether a broken one is
-        # worth its asking price is a judgement about condition, not a sum.
-        return None
+    damaged = looks_damaged(f"{title} {text}")
 
     facts = facts_for_listing(title, kind=kind, text=text)
     if not facts or not has_real_facts(facts):
@@ -905,6 +906,26 @@ def deterministic_verdict(
     fair = facts.get("fair_price_eur")
     if not deal_at or not fair:
         return None                      # no computed price -> model
+
+    if damaged:
+        # A benchmark describes a working device, so the normal bar would
+        # value a cracked phone like a good one. Broken is still worth
+        # buying at salvage money, and a missed one of those costs more
+        # than a wrong notification, so it is pushed on its own steeper
+        # bar rather than being dropped or sent away for a second opinion.
+        deal_at = round(fair * DAMAGED_PRICE_FRACTION)
+        if price <= deal_at:
+            return {
+                "decision": "deal",
+                "score": 5,
+                "comment": (
+                    f"{facts.get('chip', 'device')}: listed as damaged/for parts at "
+                    f"EUR {price:.0f}, against EUR {fair} working ({price / fair * 100:.0f}% "
+                    f"of value). Salvage price -- check what actually works."
+                ),
+                "facts": facts,
+            }
+        return None              # dearer than salvage: let the model judge
 
     discount = (1 - price / fair) * 100
     if price <= deal_at:
