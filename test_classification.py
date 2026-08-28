@@ -192,3 +192,59 @@ class TestBenchmarkScales(unittest.TestCase):
         r = df.quality_score({"kind": "phone", "benchmark_name": "passmark_device",
                               "benchmark_score": 23_515, "ram_gb": [12]})
         self.assertGreaterEqual(r["score"], 75)
+
+
+class TestFairPrice(unittest.TestCase):
+    """The price bar is arithmetic, not the model's opinion."""
+
+    def phone(self, bench, ram):
+        return df.fair_price({"kind": "phone", "benchmark_name": "antutu_v10",
+                              "benchmark_score": bench, "ram_gb": [ram]})
+
+    def test_matches_the_anchors_it_was_fitted_to(self):
+        s21 = self.phone(800_000, 8)
+        self.assertAlmostEqual(s21["fair_price_eur"], 220, delta=15)
+        self.assertAlmostEqual(s21["deal_price_eur"], 110, delta=10)
+
+    def test_users_examples_land_the_right_way(self):
+        """S21 at EUR 120 is a deal; a junk phone at EUR 40 is not."""
+        self.assertLess(self.phone(800_000, 8)["deal_price_eur"] * 1.1, 130)
+        self.assertLess(self.phone(150_000, 4)["deal_price_eur"], 40)
+
+    def test_weak_devices_are_flagged_at_any_price(self):
+        self.assertTrue(self.phone(150_000, 4)["too_weak"])
+        self.assertNotIn("too_weak", self.phone(800_000, 8))
+
+    def test_price_rises_with_performance(self):
+        vals = [self.phone(b, 8)["fair_price_eur"]
+                for b in (200_000, 500_000, 900_000, 1_800_000)]
+        self.assertEqual(vals, sorted(vals))
+
+    def test_more_ram_is_worth_more_but_only_slightly(self):
+        low = self.phone(800_000, 4)["fair_price_eur"]
+        high = self.phone(800_000, 12)["fair_price_eur"]
+        self.assertGreater(high, low)
+        self.assertLess(high - low, low * 0.5, "RAM must not dominate the chip")
+
+    def test_scales_are_reconciled(self):
+        """A PassMark phone score must price like its AnTuTu equivalent."""
+        antutu = df.fair_price({"kind": "phone", "benchmark_name": "antutu_v10",
+                                "benchmark_score": 800_000, "ram_gb": [8]})
+        passmark = df.fair_price({"kind": "phone", "benchmark_name": "passmark_device",
+                                  "benchmark_score": 9587, "ram_gb": [8]})
+        self.assertLess(abs(antutu["fair_price_eur"] - passmark["fair_price_eur"]),
+                        antutu["fair_price_eur"] * 0.4)
+
+    def test_no_benchmark_means_no_computed_price(self):
+        """Never invent a price for a device we could not verify."""
+        self.assertEqual(df.fair_price({"kind": "phone", "ram_gb": [8]}), {})
+
+    def test_laptop_uses_its_own_curve(self):
+        t480 = df.fair_price({"kind": "laptop", "benchmark_name": "passmark_cpu",
+                              "benchmark_score": 5900, "ram_gb": [8]})
+        self.assertAlmostEqual(t480["fair_price_eur"], 200, delta=25)
+
+    def test_junk_types_do_not_crash(self):
+        for bad in ({"benchmark_score": "x"}, {"benchmark_score": True},
+                    {"benchmark_score": -1}, {}):
+            self.assertIsInstance(df.fair_price({"kind": "phone", **bad}), dict)

@@ -263,6 +263,14 @@ class AIBackend(Generic[TAIConfig]):
                     "  - These facts describe the MODEL. The listing describes the "
                     "UNIT: condition, damage, completeness and honesty are yours to "
                     "judge from the seller's text below.\n"
+                    "  - Where a 'fair price' and a 'deal at <=' figure are given, "
+                    "they are COMPUTED from the benchmark and RAM, not guessed. "
+                    "Compare the asking price against them directly: at or below "
+                    "the deal price it clears the price bar; above it, it does "
+                    "not, and the rating cannot exceed 3. Do not substitute your "
+                    "own view of what the model is worth.\n"
+                    "  - 'TOO WEAK to be worth buying at any price' means exactly "
+                    "that: rate 1 however cheap it is.\n"
                 )
         except Exception as e:  # never let a facts lookup break evaluation
             if self.logger:

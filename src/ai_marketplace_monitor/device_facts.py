@@ -253,6 +253,76 @@ BENCHMARK_CEILING = {
 }
 
 
+# Fair-price curve, fitted to two anchors the buyer gave:
+#   Galaxy S21   -- 800,000 AnTuTu, 8GB -- is worth about EUR 220 used
+#   a junk phone -- 150,000 AnTuTu, 4GB -- is worth about EUR 55
+# Solving a power law through those points gives the exponent and constant
+# below. Laptops are fitted the same way against PassMark CPU Mark:
+#   ThinkPad T480 (i5-8350U, 5,900) ~ EUR 200;  i5-13450HX (24,437) ~ EUR 700
+#
+# The point is to stop asking a language model what a phone is "worth". That
+# guess is what let an iPhone 15 Pro at 31% off be called a great deal. A
+# benchmark number and a formula cannot be talked round.
+PHONE_PRICE_C, PHONE_PRICE_P = 39.3, 0.828      # EUR per (AnTuTu/100k)^p
+LAPTOP_PRICE_C, LAPTOP_PRICE_P = 41.8, 0.882    # EUR per (PassMark/1000)^p
+# Below this there is no interesting phone at any price.
+MIN_USEFUL_ANTUTU = 300_000
+
+
+def antutu_equivalent(facts: Dict[str, Any]) -> Optional[float]:
+    """Put any supported benchmark on one comparable scale.
+
+    The tables speak three dialects (AnTuTu totals, PassMark device scores,
+    Android CPU Mark). Normalising each against its own ceiling and scaling
+    to AnTuTu makes one price curve usable for all of them.
+    """
+    score = facts.get("benchmark_score")
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or score <= 0:
+        return None
+    name = (facts.get("benchmark_name") or "").lower()
+    ceiling = BENCHMARK_CEILING.get(name)
+    if ceiling is None:
+        return None
+    if name.startswith("antutu"):
+        return float(score) * (BENCHMARK_CEILING["antutu_v10"] / ceiling)
+    return min(score / ceiling, 1.25) * BENCHMARK_CEILING["antutu_v10"]
+
+
+def fair_price(facts: Dict[str, Any]) -> Dict[str, Any]:
+    """Fair used price from performance, and the price that makes it a deal.
+
+    Returns {} when the device has no benchmark: an unverified device gets
+    no computed price, rather than a made-up one.
+    """
+    out: Dict[str, Any] = {}
+    kind = facts.get("kind")
+    score = facts.get("benchmark_score")
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or score <= 0:
+        return out
+
+    if kind == "laptop":
+        value = LAPTOP_PRICE_C * (float(score) / 1000.0) ** LAPTOP_PRICE_P
+    else:
+        equiv = antutu_equivalent(facts)
+        if equiv is None:
+            return out
+        value = PHONE_PRICE_C * (equiv / 1e5) ** PHONE_PRICE_P
+        out["antutu_equivalent"] = int(equiv)
+        if equiv < MIN_USEFUL_ANTUTU:
+            out["too_weak"] = True
+
+    # RAM shifts the value, but mildly: the chip dominates how a device feels.
+    ram = [r for r in (facts.get("ram_gb") or [])
+           if isinstance(r, (int, float)) and not isinstance(r, bool) and r > 0]
+    if ram:
+        value *= min(max(min(ram) / 8.0, 0.6), 1.4) ** 0.3
+
+    out["fair_price_eur"] = int(round(value))
+    # Half of fair value is the buyer's bar for "a deal".
+    out["deal_price_eur"] = int(round(value * 0.5))
+    return out
+
+
 def quality_score(facts: Dict[str, Any]) -> Dict[str, Any]:
     """Deterministic good/bad verdict from chip + RAM + storage.
 
@@ -541,6 +611,7 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
             facts["overridden"] = True
 
     facts.update(quality_score(facts))
+    facts.update(fair_price(facts))
     facts["cached_at"] = int(time.time())
     # Only persist a resolved entry. Storing an offline/failed attempt would
     # mask the model as "known" and stop it ever being looked up properly.
@@ -760,6 +831,11 @@ def summarize(facts: Dict[str, Any]) -> str:
             bits.append("LineageOS: OFFICIAL support")
         else:
             bits.append("LineageOS: no official build")
+    if facts.get("fair_price_eur"):
+        bits.append(f"fair price ~EUR {facts['fair_price_eur']} "
+                    f"(deal at <= EUR {facts['deal_price_eur']})")
+    if facts.get("too_weak"):
+        bits.append("TOO WEAK to be worth buying at any price")
     if facts.get("score") is not None:
         bits.append(f"QUALITY {facts['score']}/100 ({facts['verdict']})")
     elif facts.get("specs_error"):
