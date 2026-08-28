@@ -585,8 +585,12 @@ class FacebookMarketplace(Marketplace):
                 ).get_listings()
                 time.sleep(5)
                 if not found_listings and self.logger:
-                    self.logger.error(
-                        f"""{hilight("[Search]", "fail")} Failed to get search results for {search_phrase} from {city}"""
+                    # Zero results is the normal answer to a narrow phrase in
+                    # a small city, not a failure. Logging it at ERROR put a
+                    # red herring in the log on every quiet search and taught
+                    # the reader to scroll past real errors.
+                    self.logger.info(
+                        f"""{hilight("[Search]", "info")} No results for {search_phrase} from {city}."""
                     )
 
                 counter.increment(CounterItem.SEARCH_PERFORMED, item_config.name)
