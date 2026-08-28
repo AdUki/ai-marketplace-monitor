@@ -837,6 +837,29 @@ def parse_price(text: Any) -> Optional[float]:
     return min(nums) if nums else None
 
 
+# Words that say the thing does not work. Benchmark data describes a working
+# device, so the arithmetic values a cracked phone exactly like a good one --
+# it priced "Samsung A51 na opravu, alebo nahradne diely" as an 87%-off deal.
+# Condition is the model's job, so these listings are handed over rather than
+# settled here.
+DAMAGE_MARKERS = (
+    "na diely", "nahradne diely", "náhradné diely", "na opravu", "na sucastky",
+    "na súčiastky", "rozbity", "rozbitý", "rozbite", "rozbité", "prasknuty",
+    "prasknutý", "prasknute", "prasknuté", "puknuty", "puknutý", "nefunkcny",
+    "nefunkčný", "nefunkcna", "nefunkčná", "nefunkcne", "nefunkčné", "pokazeny",
+    "pokazený", "poskodeny", "poškodený", "poskodene", "poškodené", "vadny",
+    "vadný", "zablokovany", "zablokovaný", "icloud lock", "for parts",
+    "spare parts", "broken", "cracked", "faulty", "not working", "defective",
+    "cez displej", "praskly displej", "prasknuty displej", "nejde zapnut",
+    "nezapina", "nezapína", "nabija len", "bez zaruky na funkcnost",
+)
+
+
+def looks_damaged(text: str) -> bool:
+    """True if the listing says the device is broken, locked or for parts."""
+    return any(m in _norm(text) or m in text.lower() for m in DAMAGE_MARKERS)
+
+
 def deterministic_verdict(
     title: str, price_text: Any, kind: str = "auto", text: str = ""
 ) -> Optional[Dict[str, Any]]:
@@ -853,6 +876,11 @@ def deterministic_verdict(
     talk itself into a "deal" on specs, which is the failure this whole
     path exists to prevent.
     """
+    if looks_damaged(f"{title} {text}"):
+        # A benchmark describes a working device. Whether a broken one is
+        # worth its asking price is a judgement about condition, not a sum.
+        return None
+
     facts = facts_for_listing(title, kind=kind, text=text)
     if not facts or not has_real_facts(facts):
         return None                      # unknown device -> model
