@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import difflib
 import html
+import http.cookiejar
 import json
 import re
 import time
@@ -50,9 +51,15 @@ VALID_RANGE = {
 MAX_AGE = 30 * 24 * 3600  # PassMark updates continuously; monthly is plenty
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
 
+CPU_PAGE_URL = "https://www.cpubenchmark.net/CPU_mega_page.html"
+CPU_DATA_URL = "https://www.cpubenchmark.net/data/"
+
 SOURCES = {
-    "cpu": ("https://www.cpubenchmark.net/cpu_list.php",
-            r'<tr id="cpu\d+"><td><a href="[^"]*">([^<]+)</a></td><td>([\d,]+)</td>'),
+    # cpu_list.php serves ONE vendor per page and defaults to Intel: it gave
+    # 2,844 entries, every one of them Intel, so every Ryzen machine silently
+    # had no benchmark at all. The mega page's own data feed carries the whole
+    # list (6,700+ parts, AMD included) as JSON.
+    "cpu": (CPU_DATA_URL, None),
     "gpu": ("https://www.videocardbenchmark.net/gpu_list.php",
             r'<TR id="gpu\d+"><TD><A HREF="[^"]*">([^<]+)</A></TD><TD>([\d,]+)</TD>'),
     "device": ("https://www.androidbenchmark.net/device_list.php",
@@ -67,10 +74,52 @@ SOURCES = {
 }
 
 
-def _fetch(url: str, timeout: int = 60) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+def _fetch(url: str, timeout: int = 60, referer: str = "") -> str:
+    headers = {"User-Agent": UA}
+    if referer:
+        # The JSON feed answers with an empty list unless the request looks
+        # like the table on the page asking for its own rows.
+        headers.update({
+            "Referer": referer,
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        })
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "replace")
+
+
+def _fetch_cpu_json(timeout: int = 120) -> Dict[str, int]:
+    """The full CPU list, both vendors, from the mega page's data feed.
+
+    Needs a session: fetch the page first so the feed sees a cookie, then ask
+    for the rows the way the page does. Without that it returns {"data": []}
+    with a 200, which would look like a successful download of nothing.
+    """
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+    page_req = urllib.request.Request(CPU_PAGE_URL, headers={"User-Agent": UA})
+    with opener.open(page_req, timeout=timeout):
+        pass                      # discard the HTML; we only want the cookie
+    data_req = urllib.request.Request(CPU_DATA_URL, headers={
+        "User-Agent": UA,
+        "Referer": CPU_PAGE_URL,
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    })
+    with opener.open(data_req, timeout=timeout) as r:
+        blob = json.loads(r.read().decode("utf-8", "replace"))
+    rows: Dict[str, int] = {}
+    for row in blob.get("data", []):
+        name, mark = html.unescape(str(row.get("name", "")).strip()), row.get("cpumark")
+        try:
+            score = int(str(mark).replace(",", ""))
+        except (TypeError, ValueError):
+            continue              # "NA" for parts with no submissions
+        if name and score > 0:
+            rows[name] = score
+    return rows
 
 
 def _parse_chart(page: str) -> Dict[str, int]:
@@ -89,6 +138,11 @@ def download(verbose: bool = True) -> Dict[str, Dict[str, int]]:
     tables: Dict[str, Dict[str, int]] = {}
     for kind, (url, pattern) in SOURCES.items():
         try:
+            if kind == "cpu":
+                tables[kind] = _fetch_cpu_json()
+                if verbose:
+                    print(f"  {kind}: {len(tables[kind])} entries")
+                continue
             page = _fetch(url)
         except Exception as e:  # noqa: BLE001 - keep whatever else succeeded
             if verbose:
@@ -190,6 +244,15 @@ def _norm(s: str) -> str:
 # "Note 12") is, and confusing the two is how "Redmi Note 12 Pro" matched
 # the entirely different "Redmi Pro".
 _CAPACITY = re.compile(r"^\d+(gb|tb|mb)$")
+_BRANDS = {
+    "samsung", "apple", "iphone", "ipad", "macbook", "xiaomi", "redmi", "poco",
+    "huawei", "honor", "realme", "oppo", "vivo", "oneplus", "nokia", "motorola",
+    "lenovo", "thinkpad", "asus", "acer", "dell", "hp", "msi", "lg", "sony",
+    "google", "pixel", "nothing", "zte", "alcatel", "tcl", "meizu", "infinix",
+    "tecno", "umidigi", "doogee", "blackview", "cubot", "ulefone",
+}
+
+
 _VENDOR_FILLER = {
     "intel", "amd", "apple", "core", "processor", "cpu", "gpu", "with",
     "graphics", "mobile", "series", "nvidia", "geforce", "radeon",
@@ -258,6 +321,145 @@ _VARIANTS = {
 
 def _signature(tokens) -> set:
     return {t for t in tokens if t not in _FILLER and not _CAPACITY.match(t)}
+
+
+# --- Phrase index -------------------------------------------------------
+#
+# Fuzzy-matching an extracted model name against 16k entries is both slow and
+# guessy: it has a similarity threshold, and any threshold admits nonsense.
+# "iPhone 15 Pro" scored 0.67 against a junk Android entry literally named
+# "Pro 15" -- same model number, same variant word, one word unexplained --
+# and came back as a 60k-AnTuTu device.
+#
+# Inverting it removes the guessing. Index every known product name by its
+# token phrase once, then look for those phrases INSIDE the listing text.
+# A hit is an exact phrase, not a similarity score, so word order matters:
+# "15 pro" is not "pro 15". It is also a plain dict lookup per n-gram, so
+# scanning a whole description costs microseconds.
+#
+# This runs first; the fuzzy matcher stays as the fallback for listings whose
+# wording no index entry covers.
+
+_PHRASE_INDEX: Dict[str, Tuple[Dict[str, Tuple[str, int]], int]] = {}
+
+# Phrases too generic to identify a product on their own. Without this, an
+# entry named "Android 001" or a bare brand would match half the marketplace.
+_MIN_PHRASE_TOKENS = 2
+
+
+# Words either side may freely omit: line names, radios, vendor boilerplate
+# and the brand itself. A seller writes "Galaxy S21", PassMark writes "Samsung
+# Galaxy S21 5G", and neither is more correct than the other.
+_OPTIONAL = _FILLER | _VENDOR_FILLER | _BRANDS | _LISTING_NOISE
+
+# Cap on how many optional words one phrase may drop. Every subset is indexed,
+# so this bounds the work at 2**5; longer names simply keep their tail.
+_MAX_OPTIONAL_DROPPED = 5
+
+
+def prepare(text: str) -> list:
+    """The one text preparation both sides go through.
+
+    Index entries and listing text MUST be prepared identically, or a phrase
+    present in both fails to match on a difference neither side chose. That
+    happened: listing text had "5g" stripped as noise while index entries kept
+    it, so "galaxy s21 5g" and "galaxy s21" existed on opposite sides and the
+    phone went unrecognised.
+
+    Lowercases, folds Slovak accents to ASCII, turns every non-alphanumeric
+    character into a space, collapses runs of spaces, and joins capacities
+    ("128 GB" -> "128gb") so they read as one fact.
+    """
+    return _tokens(text)
+
+
+def _phrase_forms(tokens) -> list:
+    """Every reading of a name once optional words are dropped.
+
+    Enumerating the subsets, rather than a few fixed combinations, is what
+    makes the two sides agree: whichever optional words the seller left out,
+    some indexed form matches exactly. Word order is never touched, which is
+    what still keeps "15 pro" from matching an entry named "Pro 15".
+    """
+    core = [t for t in tokens if not _CAPACITY.match(t)]
+    optional = [i for i, t in enumerate(core) if t in _OPTIONAL]
+    forms, seen = [], set()
+    for mask in range(1 << min(len(optional), _MAX_OPTIONAL_DROPPED)):
+        dropped = {optional[i] for i in range(min(len(optional), _MAX_OPTIONAL_DROPPED))
+                   if mask >> i & 1}
+        form = [t for i, t in enumerate(core) if i not in dropped]
+        phrase = " ".join(form)
+        if form and phrase not in seen:
+            seen.add(phrase)
+            forms.append(form)
+    return forms
+
+
+def _index_phrases(name: str) -> set:
+    """The phrases a listing might plausibly spell this entry as.
+
+    PassMark writes "Samsung Galaxy S21 5G (Exynos)" and "Intel Core i5-8350U
+    @ 1.70GHz"; a seller writes neither. Index the qualified form, the plain
+    one, and every reading of both with optional words dropped.
+    """
+    phrases = set()
+    for tokens in (prepare(name), _entry_tokens(name)):
+        for form in _phrase_forms(tokens):
+            phrases.add(" ".join(form))
+    # A phrase must carry a model number and two words, or it names a product
+    # line rather than a product and would match half the marketplace.
+    return {p for p in phrases if len(p.split()) >= _MIN_PHRASE_TOKENS
+            and any(c.isdigit() for c in p)}
+
+
+def phrase_index(kind: str, table: Dict[str, int]) -> Tuple[Dict[str, Tuple[str, int]], int]:
+    """Build (phrase -> (name, score), longest phrase) once per table."""
+    cached = _PHRASE_INDEX.get(kind)
+    if cached and cached[2] == len(table):
+        return cached[0], cached[1]
+    index: Dict[str, Tuple[str, int]] = {}
+    longest = 0
+    for name, score in table.items():
+        for phrase in _index_phrases(name):
+            prev = index.get(phrase)
+            # Two entries can share a phrase ("... S21 5G" exists for both the
+            # Exynos and Snapdragon build). Keep the lower score: overstating
+            # performance is what turns a mediocre phone into a false "deal".
+            if prev is None or score < prev[1]:
+                index[phrase] = (name, score)
+            longest = max(longest, len(phrase.split()))
+    _PHRASE_INDEX[kind] = (index, longest, len(table))
+    return index, longest
+
+
+def find_in_text(text: str, kind: str, table: Dict[str, int]) -> Optional[Tuple[str, int]]:
+    """Longest known product name occurring in `text`, or None.
+
+    Longest wins so "Galaxy S21 Ultra" beats "Galaxy S21" on a listing that
+    says Ultra -- the shorter phrase is a prefix of the real product and
+    would silently value a different phone.
+    """
+    if not text or not table:
+        return None
+    index, longest = phrase_index(kind, table)
+    raw = prepare(text)
+    listing_variants = set(raw) & _VARIANTS
+    best = None
+    for toks in _phrase_forms(raw):
+        for n in range(min(longest, len(toks)), _MIN_PHRASE_TOKENS - 1, -1):
+            if best and n <= best[0]:
+                break            # a longer phrase already won
+            for i in range(len(toks) - n + 1):
+                hit = index.get(" ".join(toks[i:i + n]))
+                # A variant word names a different, dearer product. "Galaxy
+                # S21 Ultra" contains the phrase "Galaxy S21", so without
+                # this an Ultra would be valued as the base model.
+                if hit and (set(_tokens(hit[0])) & _VARIANTS) == listing_variants:
+                    best = (n, hit)
+                    break
+            if best and best[0] == n:
+                break
+    return best[1] if best else None
 
 
 def match_device(query: str, table: Dict[str, int]) -> Optional[Tuple[str, int]]:
@@ -330,22 +532,28 @@ def match_component(query: str, table: Dict[str, int]) -> Optional[Tuple[str, in
     return best
 
 
+def _lookup(text: str, kind: str, fuzzy) -> Optional[Tuple[str, int]]:
+    """Exact phrase first, fuzzy match second."""
+    table = load(auto_download=False).get(kind, {})
+    return find_in_text(text, kind, table) or fuzzy(text, table)
+
+
 def lookup_device(title: str) -> Optional[Tuple[str, int]]:
-    """PassMark overall score for an Android phone, by listing title."""
-    return match_device(title, load(auto_download=False).get("device", {}))
+    """PassMark overall score for an Android phone, by listing text."""
+    return _lookup(title, "device", match_device)
 
 
 def lookup_device_cpu(title: str) -> Optional[Tuple[str, int]]:
     """Android CPU Mark, for phones the overall-score table omits."""
-    return match_device(title, load(auto_download=False).get("device_cpu", {}))
+    return _lookup(title, "device_cpu", match_device)
 
 
 def lookup_cpu(text: str) -> Optional[Tuple[str, int]]:
-    return match_component(text, load(auto_download=False).get("cpu", {}))
+    return _lookup(text, "cpu", match_component)
 
 
 def lookup_gpu(text: str) -> Optional[Tuple[str, int]]:
-    return match_component(text, load(auto_download=False).get("gpu", {}))
+    return _lookup(text, "gpu", match_component)
 
 
 def main() -> int:

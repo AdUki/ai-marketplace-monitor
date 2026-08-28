@@ -527,7 +527,7 @@ def has_real_facts(facts: Dict[str, Any]) -> bool:
     )
 
 
-def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
+def facts_from_tables(title: str, kind: str, text: str = "") -> Dict[str, Any]:
     """Specs from downloaded/shipped data. No network call, no AI.
 
     Order of preference:
@@ -542,23 +542,28 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
     except ImportError:  # run as a standalone file, not a package member
         import benchmark_db as bdb
 
+    # Sellers often leave the model out of the title and spell it in the
+    # description ("Samsung" / "...je to Galaxy S21 5G, 128GB..."). Searching
+    # the full text finds those; it costs a dict lookup per n-gram.
+    haystack = f"{title} {text}".strip() if text else title
+
     out: Dict[str, Any] = {}
     if kind in ("laptop", "desktop"):
-        hit = bdb.lookup_cpu(title)
+        hit = bdb.lookup_cpu(haystack)
         if hit:
             out.update(chip=hit[0], benchmark_name="passmark_cpu", benchmark_score=hit[1])
     else:
-        hit = bdb.lookup_device(title)
+        hit = bdb.lookup_device(haystack)
         if hit:
             out.update(chip=hit[0], benchmark_name="passmark_device", benchmark_score=hit[1])
-        elif bdb.lookup_device_cpu(title):
+        elif bdb.lookup_device_cpu(haystack):
             # Second phone table: different coverage, CPU Mark rather than the
             # overall score, so it has its own scale.
-            hit = bdb.lookup_device_cpu(title)
+            hit = bdb.lookup_device_cpu(haystack)
             out.update(chip=hit[0], benchmark_name="android_cpumark", benchmark_score=hit[1])
         else:
             # Entries learned from earlier web lookups, stored as AnTuTu.
-            learned = bdb.match_device(title, bdb.load(auto_download=False).get("antutu", {}))
+            learned = bdb.match_device(haystack, bdb.load(auto_download=False).get("antutu", {}))
             if learned:
                 out.update(chip=learned[0], benchmark_name="antutu_v10",
                            benchmark_score=learned[1])
@@ -568,7 +573,7 @@ def facts_from_tables(title: str, kind: str) -> Dict[str, Any]:
         key = model_key(title)
         entry = None
         for name, info in chips.get("models", {}).items():
-            if name in key or key in name:
+            if override_applies(key, model_key(name)):
                 if entry is None or len(name) > len(entry[0]):
                     entry = (name, info)
         if entry:
@@ -602,7 +607,8 @@ def _load_chips() -> Dict[str, Any]:
     return _CHIPS_CACHE
 
 
-def device_facts(model: str, refresh: bool = False, offline: bool = False, kind: str = "auto") -> Dict[str, Any]:
+def device_facts(model: str, refresh: bool = False, offline: bool = False,
+                 kind: str = "auto", text: str = "") -> Dict[str, Any]:
     """Facts for one model. Cached, so each model costs one lookup ever.
 
     offline=True skips the (slow, rate-limited) web spec lookup and returns
@@ -612,10 +618,21 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     cache = _load(FACTS_CACHE)
     key = model_key(model)
     if not is_identifiable(key):
-        # Brand without model: no table, override or lookup can honestly
-        # answer it, and every one of them used to answer anyway.
-        return {"query": model, "kind": kind if kind != "auto" else guess_kind(model),
-                "specs_error": "no model in title"}
+        # Brand without model. No table, override or lookup can honestly
+        # answer THE TITLE, and every one of them used to answer anyway.
+        # The description may still name the device, so search that; a hit
+        # there is an exact known product name, not a guess.
+        kind = kind if kind != "auto" else guess_kind(model)
+        facts = {"query": model, "kind": kind}
+        facts.update(facts_from_tables(model, kind, text) if text else {})
+        if not has_real_facts(facts):
+            facts["specs_error"] = "no model in title"
+            return facts
+        # Deliberately not cached: the key ("samsung") names no device, so
+        # storing it here is what poisoned the cache in the first place.
+        facts.update(quality_score(facts))
+        facts.update(fair_price(facts))
+        return facts
 
     if not refresh and key in cache:
         return cache[key]
@@ -625,7 +642,7 @@ def device_facts(model: str, refresh: bool = False, offline: bool = False, kind:
     facts: Dict[str, Any] = {"query": model, "kind": kind}
     # Free, instant, deterministic. Only fall through to a web lookup for
     # models no table knows about.
-    facts.update(facts_from_tables(model, kind))
+    facts.update(facts_from_tables(model, kind, text))
 
     api_key = "" if offline or has_real_facts(facts) else os.environ.get("GROQ_API_KEY", "")
     if api_key:
@@ -821,7 +838,7 @@ def parse_price(text: Any) -> Optional[float]:
 
 
 def deterministic_verdict(
-    title: str, price_text: Any, kind: str = "auto"
+    title: str, price_text: Any, kind: str = "auto", text: str = ""
 ) -> Optional[Dict[str, Any]]:
     """Settle a listing from data alone, or hand it to the model.
 
@@ -836,7 +853,7 @@ def deterministic_verdict(
     talk itself into a "deal" on specs, which is the failure this whole
     path exists to prevent.
     """
-    facts = facts_for_listing(title, kind=kind)
+    facts = facts_for_listing(title, kind=kind, text=text)
     if not facts or not has_real_facts(facts):
         return None                      # unknown device -> model
 
@@ -972,7 +989,7 @@ def override_applies(key: str, ov_norm: str) -> bool:
     return all(w in k_sig or _close_to_any(w, k_sig) for w in o_sig)
 
 
-def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
+def facts_for_listing(title: str, kind: str = "auto", text: str = "") -> Dict[str, Any]:
     """Cache-only facts for a listing title, queueing a lookup on a miss.
 
     Called on the evaluation hot path, so it must never touch the network:
@@ -983,10 +1000,12 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
     cache = _load(FACTS_CACHE)
     key = model_key(title)
     if not is_identifiable(key):
-        # A brand with no model ("samsung", "iphone") names no device. Never
-        # resolve it and never queue it: guessing here priced a bare "Samsung"
-        # fridge as a flagship phone and called EUR 100 a deal.
-        return device_facts(title, offline=True, kind=kind)
+        # The title names no device ("Samsung"). The description still might,
+        # so try the tables on the full text before giving up; only a bare
+        # brand with nothing anywhere is refused. Guessing here priced a
+        # "Samsung" fridge as a flagship phone and called EUR 100 a deal.
+        from_text = device_facts(title, offline=True, kind=kind, text=text)
+        return from_text
     hit = cache.get(key)
     if hit is None:
         # A cached entry serves this listing only if it is the SAME device.
@@ -1006,7 +1025,7 @@ def facts_for_listing(title: str, kind: str = "auto") -> Dict[str, Any]:
             _save(PENDING, pending)
     except OSError:
         pass
-    return device_facts(title, offline=True, kind=kind)
+    return device_facts(title, offline=True, kind=kind, text=text)
 
 
 def warm_cache(limit: int = 5, verbose: bool = True) -> int:

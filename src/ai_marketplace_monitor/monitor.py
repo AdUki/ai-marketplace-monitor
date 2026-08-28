@@ -210,7 +210,10 @@ class MarketplaceMonitor:
             try:
                 from .device_facts import deterministic_verdict
 
-                verdict = deterministic_verdict(listing.title, listing.price)
+                verdict = deterministic_verdict(
+                    listing.title, listing.price,
+                    text=getattr(listing, "description", "") or "",
+                )
                 if verdict:
                     res = AIResponse(
                         score=verdict["score"],
