@@ -54,15 +54,33 @@ class NtfyNotificationConfig(PushNotificationConfig):
         msg = f"{message}\n\nSent by https://github.com/BoPeng/ai-marketplace-monitor"
         assert self.ntfy_server is not None
         assert self.ntfy_topic is not None
-        requests.post(
-            f"{self.ntfy_server.rstrip('/')}/{self.ntfy_topic}",
-            msg,
-            headers={
-                "Title": title,
-                "Markdown": "yes" if self.message_format == "markdown" else "no",
-            },
-            timeout=10,
-        )
+        try:
+            response = requests.post(
+                f"{self.ntfy_server.rstrip('/')}/{self.ntfy_topic}",
+                msg,
+                headers={
+                    "Title": title,
+                    "Markdown": "yes" if self.message_format == "markdown" else "no",
+                },
+                # Separate connect and read timeouts, so "could not reach the
+                # server" is distinguishable from "sent it, answer was slow".
+                timeout=(5, 10),
+            )
+            # The status was previously ignored entirely: a rejected message
+            # was reported as sent.
+            response.raise_for_status()
+        except requests.exceptions.ReadTimeout:
+            # The request WAS sent and ntfy very likely delivered it; only the
+            # reply was slow. The caller retries on any exception, and ntfy has
+            # no idempotency key, so re-sending here delivers the notification
+            # a second time. A possible duplicate is worse than a possible
+            # missed log line, so this counts as sent.
+            if logger:
+                logger.info(
+                    f"""{hilight("[Notify]", "info")} {self.name}: ntfy did not answer in time; """
+                    f"""treating as sent rather than risking a duplicate."""
+                )
+            return True
 
         if logger:
             logger.info(
